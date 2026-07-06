@@ -9,6 +9,7 @@ against the live API once real credentials are wired up.
 
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +22,32 @@ _BUYING_OPTION_MAP: dict[str, BuyingOption] = {
     "FIXED_PRICE": "fixed_price",
     "AUCTION": "auction",
 }
+
+_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+
+
+def get_ebay_access_token(
+    app_id: str, cert_id: str, *, client: httpx.Client | None = None
+) -> str:
+    """Exchange the (non-expiring) App ID/Cert ID pair for a fresh bearer
+    token via eBay's client-credentials grant. Call this once per run --
+    the app_id/cert_id never expire, so there's nothing to manage by hand.
+    """
+    client = client or httpx.Client(timeout=15.0)
+    credentials = base64.b64encode(f"{app_id}:{cert_id}".encode()).decode()
+    response = client.post(
+        _TOKEN_URL,
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={
+            "grant_type": "client_credentials",
+            "scope": "https://api.ebay.com/oauth/api_scope",
+        },
+    )
+    response.raise_for_status()
+    return str(response.json()["access_token"])
 
 
 def _buying_option(options: list[str]) -> BuyingOption:
@@ -86,7 +113,10 @@ class EbayAdapter:
         response = self._client.get(
             "/buy/browse/v1/item_summary/search",
             params={"q": self._query, "limit": 50},
-            headers={"Authorization": f"Bearer {self._app_token}"},
+            headers={
+                "Authorization": f"Bearer {self._app_token}",
+                "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+            },
         )
         response.raise_for_status()
         payload = response.json()

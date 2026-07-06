@@ -1,9 +1,10 @@
+import base64
 import json
 from pathlib import Path
 
 import httpx
 
-from sw_sourcing.adapters.ebay import EbayAdapter, normalize_item
+from sw_sourcing.adapters.ebay import EbayAdapter, get_ebay_access_token, normalize_item
 
 FIXTURE = json.loads(
     (
@@ -65,3 +66,59 @@ def test_fetch_normalizes_every_item_in_the_search_response() -> None:
         "v1|110599777099|0",
         "v1|110599777100|0",
     }
+
+
+def test_fetch_sends_the_bearer_token_and_marketplace_header() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=FIXTURE)
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport, base_url="https://api.ebay.com")
+    adapter = EbayAdapter(
+        app_token="fake-token", query="vintage kenner star wars", client=client
+    )
+
+    adapter.fetch()
+
+    assert captured[0].headers["Authorization"] == "Bearer fake-token"
+    assert captured[0].headers["X-EBAY-C-MARKETPLACE-ID"] == "EBAY_US"
+
+
+def test_get_ebay_access_token_returns_the_token_from_the_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "fresh-token",
+                "expires_in": 7200,
+                "token_type": "Application Access Token",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+
+    token = get_ebay_access_token("app-id", "cert-id", client=client)
+
+    assert token == "fresh-token"
+
+
+def test_get_ebay_access_token_sends_client_credentials_grant_with_basic_auth() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"access_token": "fresh-token"})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+
+    get_ebay_access_token("app-id", "cert-id", client=client)
+
+    request = captured[0]
+    expected_credentials = base64.b64encode(b"app-id:cert-id").decode()
+    assert request.headers["Authorization"] == f"Basic {expected_credentials}"
+    assert b"grant_type=client_credentials" in request.content
