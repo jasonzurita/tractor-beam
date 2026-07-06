@@ -55,3 +55,9 @@ def test_default_blocklist_matches_spec(tmp_path: Path) -> None:
 def test_default_max_repro_risk_for_autobuy_is_low(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     assert config.get("max_repro_risk_for_autobuy") == "low"
+
+
+def test_default_prefilter_keywords_and_price_ceiling_are_set(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    assert "kenner" in config.get("prefilter_required_keywords")
+    assert config.get("prefilter_max_listing_price") == 500.00

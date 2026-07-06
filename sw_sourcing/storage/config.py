@@ -31,6 +31,10 @@ DEFAULTS: dict[str, Any] = {
     "max_damage_ratio": 0.20,
     "confidence_floor": 0.5,
     "sources_enabled": ["ebay", "facebook", "mercari"],
+    # Cheap pre-vision screen (core/prefilter.py) -- not in the original
+    # spec table, added when wiring the pipeline together.
+    "prefilter_required_keywords": ["kenner", "vintage", "star wars"],
+    "prefilter_max_listing_price": 500.00,
 }
 
 

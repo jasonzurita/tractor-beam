@@ -193,6 +193,8 @@ Compute **cost per target-grade figure** = `(price + shipping) / target_grade_co
 | `max_damage_ratio` | 0.20 | Skip lot if > this share damaged/low |
 | `confidence_floor` | 0.5 | Below this → human review |
 | `sources_enabled` | ["ebay","facebook","mercari"] | Which adapters run (FB in v1) |
+| `prefilter_required_keywords` | ["kenner","vintage","star wars"] | Cheap pre-vision topic screen (title/description, any match) |
+| `prefilter_max_listing_price` | 500.00 | Cheap pre-vision price ceiling (price + shipping) |
 
 Stored in a SQLite `config` table (or Airtable) so it's editable from your phone.
 
