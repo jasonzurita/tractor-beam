@@ -12,6 +12,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sw_sourcing.adapters.base import Adapter
 from sw_sourcing.alerts.discord import DiscordAlerts, format_alert, format_heartbeat
@@ -22,6 +23,7 @@ from sw_sourcing.core.negotiation import suggested_offer
 from sw_sourcing.core.prefilter import passes_prefilter
 from sw_sourcing.core.schema import Listing
 from sw_sourcing.core.vision import Vision, VisionResult
+from sw_sourcing.diagnostics import DEFAULT_REPORTS_DIR, write_report
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
 
@@ -37,6 +39,7 @@ class RunSummary:
     sources_failed: list[str] = field(default_factory=list)
     listings_seen: int = 0
     alerts_sent: int = 0
+    bug_reports_written: int = 0
 
 
 class Pipeline:
@@ -49,6 +52,7 @@ class Pipeline:
         config: Config,
         db: Database,
         alerts: DiscordAlerts,
+        bug_reports_dir: Path | str = DEFAULT_REPORTS_DIR,
     ) -> None:
         self._adapters = adapters
         self._dedupe = dedupe
@@ -56,6 +60,7 @@ class Pipeline:
         self._config = config
         self._db = db
         self._alerts = alerts
+        self._bug_reports_dir = bug_reports_dir
 
     def run(self) -> RunSummary:
         summary = RunSummary()
@@ -64,9 +69,16 @@ class Pipeline:
         for source, adapter in self._adapters.items():
             try:
                 listings = adapter.fetch()
-            except Exception:
+            except Exception as exc:
                 logger.exception("Adapter %s failed; skipping this run", source)
                 summary.sources_failed.append(source)
+                write_report(
+                    summary=f"Adapter {source} failed during fetch()",
+                    context={"source": source},
+                    exception=exc,
+                    reports_dir=self._bug_reports_dir,
+                )
+                summary.bug_reports_written += 1
                 continue
 
             summary.sources_ok.append(source)
@@ -74,12 +86,22 @@ class Pipeline:
             for listing in listings:
                 try:
                     self._process(listing, summary)
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Failed to process %s/%s; skipping",
                         listing.source,
                         listing.listing_id,
                     )
+                    write_report(
+                        summary=(
+                            f"Failed to process listing {listing.source}/"
+                            f"{listing.listing_id}"
+                        ),
+                        context={"listing": listing},
+                        exception=exc,
+                        reports_dir=self._bug_reports_dir,
+                    )
+                    summary.bug_reports_written += 1
 
         self._db.record_run(
             started_at=started_at,
@@ -94,6 +116,7 @@ class Pipeline:
                 sources_failed=summary.sources_failed,
                 listings_seen=summary.listings_seen,
                 alerts_sent=summary.alerts_sent,
+                bug_reports_written=summary.bug_reports_written,
             )
         )
         return summary

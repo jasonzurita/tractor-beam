@@ -71,6 +71,27 @@ def test_format_heartbeat_flags_failed_sources() -> None:
     assert "⚠️" in payload["content"]
 
 
+def test_format_heartbeat_flags_bug_reports_when_any_were_written() -> None:
+    payload = format_heartbeat(
+        sources_ok=["ebay"],
+        sources_failed=[],
+        listings_seen=5,
+        alerts_sent=1,
+        bug_reports_written=2,
+    )
+
+    assert "🐛" in payload["content"]
+    assert "2" in payload["content"]
+
+
+def test_format_heartbeat_omits_bug_report_line_when_none_written() -> None:
+    payload = format_heartbeat(
+        sources_ok=["ebay"], sources_failed=[], listings_seen=5, alerts_sent=1
+    )
+
+    assert "🐛" not in payload["content"]
+
+
 def test_send_posts_the_payload_to_the_webhook_url() -> None:
     client = FakeHttpxClient()
     alerts = DiscordAlerts("https://discord.example/webhook", client=client)  # type: ignore[arg-type]

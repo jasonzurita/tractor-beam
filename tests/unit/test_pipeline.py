@@ -56,6 +56,7 @@ def make_pipeline(
     alerts = DiscordAlerts("https://discord.example/webhook", client=discord_client)  # type: ignore[arg-type]
     pipeline = Pipeline(
         adapters=adapters,
+        bug_reports_dir=tmp_path / "bug_reports",
         dedupe=dedupe,
         vision=vision,
         config=config,
@@ -142,6 +143,18 @@ def test_run_isolates_a_failing_adapter_and_still_processes_others(
     assert summary.alerts_sent == 1
 
 
+def test_run_writes_a_bug_report_when_an_adapter_fails(tmp_path: Path) -> None:
+    adapters = {"broken": FakeAdapter(error=RuntimeError("source down"))}
+    pipeline, _, _ = make_pipeline(tmp_path, adapters)
+
+    summary = pipeline.run()
+
+    reports = list((tmp_path / "bug_reports").glob("*.md"))
+    assert summary.bug_reports_written == 1
+    assert len(reports) == 1
+    assert "source down" in reports[0].read_text()
+
+
 def test_run_isolates_a_failing_listing_and_still_processes_the_rest(
     tmp_path: Path,
 ) -> None:
@@ -162,6 +175,27 @@ def test_run_isolates_a_failing_listing_and_still_processes_the_rest(
 
     assert vision_client.calls == 2
     assert summary.alerts_sent == 1  # listing_a's grading failed; listing_b succeeded
+
+
+def test_run_writes_a_bug_report_when_a_listing_fails_to_process(
+    tmp_path: Path,
+) -> None:
+    listing = make_listing(listing_id="a", price=10.0, shipping=0.0)
+    pipeline, _, _ = make_pipeline(
+        tmp_path,
+        {"ebay": FakeAdapter([listing])},
+        vision_response=BUY_RESULT,
+        fail_first=True,
+    )
+
+    summary = pipeline.run()
+
+    reports = list((tmp_path / "bug_reports").glob("*.md"))
+    assert summary.bug_reports_written == 1
+    assert len(reports) == 1
+    content = reports[0].read_text()
+    assert "a" in content
+    assert "simulated grading failure" in content
 
 
 def test_run_sends_a_heartbeat_after_processing(tmp_path: Path) -> None:

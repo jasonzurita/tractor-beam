@@ -55,6 +55,7 @@ def format_heartbeat(
     sources_failed: Sequence[str],
     listings_seen: int,
     alerts_sent: int,
+    bug_reports_written: int = 0,
 ) -> dict[str, Any]:
     """Build a Discord webhook payload for one run's heartbeat summary."""
     status = "✅" if not sources_failed else "⚠️"
@@ -65,6 +66,11 @@ def format_heartbeat(
     ]
     if sources_failed:
         lines.append(f"Sources failed: {', '.join(sources_failed)}")
+    if bug_reports_written:
+        lines.append(
+            f"🐛 {bug_reports_written} bug report(s) written to bug_reports/ "
+            "for review"
+        )
 
     return {"content": "\n".join(lines)}
 
