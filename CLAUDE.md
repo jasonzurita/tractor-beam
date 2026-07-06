@@ -53,12 +53,14 @@ sw_sourcing/
     config.py          # typed config accessor
   alerts/
     discord.py
+  diagnostics.py       # automatic bug reporting (see below) -- not auto-fix
   pipeline.py          # orchestrates one run (wires the pieces together)
   cli.py               # cron entrypoint
 tests/                 # mirrors the package tree
   unit/                # pure-logic tests, no network
   fixtures/            # recorded API/scraper/vision responses
   integration/         # opt-in, real creds, marked @integration
+bug_reports/           # gitignored; written by diagnostics.py, reviewed by hand
 ```
 
 ## Module responsibilities
@@ -72,6 +74,7 @@ tests/                 # mirrors the package tree
 | `core/vision.py` | Prompt + parse grade & repro-risk JSON; deterministically recomputes `target_grade_count`/`authentic_weapon_count` from the parsed `items` list | Hardcode a client; caching lives here + storage; **trust the model's own aggregate counts** |
 | `storage/*` | SQLite reads/writes | Contain decision logic |
 | `alerts/*` | Formatting + sending | Decide what qualifies as an alert |
+| `diagnostics.py` | Writing bug reports (context + traceback + repro) for human review | **Auto-fix or self-modify code.** This project deliberately has no autonomous self-healing -- errors are captured for periodic manual review with Claude Code, never acted on unattended |
 | `pipeline.py` | Wiring + orchestration | Reimplement any of the above |
 
 ---
