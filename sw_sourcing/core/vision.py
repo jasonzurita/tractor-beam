@@ -26,7 +26,15 @@ from sw_sourcing.storage.db import Database
 Grade = Literal["high", "mid", "low", "damaged", "uncertain"]
 ItemType = Literal["figure", "weapon", "accessory"]
 
-_GOOD_GRADES: frozenset[Grade] = frozenset({"high", "mid"})
+# "damaged"/"uncertain" never count toward target_grade_count regardless of
+# grade_floor -- they aren't points on the wear spectrum, they're rejects.
+_GRADE_ORDER: dict[Grade, int] = {
+    "high": 3,
+    "mid": 2,
+    "low": 1,
+    "damaged": 0,
+    "uncertain": -1,
+}
 _RISK_ORDER: dict[ReproRisk, int] = {"low": 0, "elevated": 1, "high": 2}
 
 
@@ -45,14 +53,19 @@ class VisionResult(BaseModel):
     photo_quality: str
     notes: str = ""
 
-    @property
-    def target_grade_count(self) -> int:
-        """Figures that are mid+ grade, undamaged, and repro_risk low."""
+    def target_grade_count(self, *, grade_floor: Grade = "mid") -> int:
+        """Figures at or above `grade_floor`, undamaged, and repro_risk low.
+
+        `grade_floor` is config-driven (see storage/config.py), never
+        hardcoded here -- CLAUDE.md locks it as a business rule.
+        """
+        floor_rank = _GRADE_ORDER[grade_floor]
         return sum(
             1
             for item in self.items
             if item.type == "figure"
-            and item.grade in _GOOD_GRADES
+            and item.grade not in ("damaged", "uncertain")
+            and _GRADE_ORDER[item.grade] >= floor_rank
             and item.repro_risk == "low"
         )
 

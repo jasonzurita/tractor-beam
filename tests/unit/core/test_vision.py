@@ -81,7 +81,42 @@ def test_target_grade_count_is_recomputed_not_trusted(tmp_path: Path) -> None:
     result = vision.grade(
         images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
     )
-    assert result.target_grade_count == 1  # only item 1: figure, high, risk low
+    assert result.target_grade_count() == 1  # only item 1: figure, high, risk low
+
+
+def test_target_grade_count_respects_the_grade_floor(tmp_path: Path) -> None:
+    mixed_grades = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "figure",
+                    "grade": "mid",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                },
+                {
+                    "id": 2,
+                    "type": "figure",
+                    "grade": "low",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    vision, _ = make_vision(tmp_path, response=mixed_grades)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+
+    assert result.target_grade_count(grade_floor="high") == 0
+    assert result.target_grade_count(grade_floor="mid") == 1
+    assert result.target_grade_count(grade_floor="low") == 2
 
 
 def test_authentic_weapon_count_ignores_grade_and_only_gates_on_repro_risk(
@@ -141,7 +176,7 @@ def test_empty_items_never_crash_the_derived_properties(tmp_path: Path) -> None:
     result = vision.grade(
         images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
     )
-    assert result.target_grade_count == 0
+    assert result.target_grade_count() == 0
     assert result.authentic_weapon_count == 0
     assert result.max_repro_risk == "low"
     assert result.min_confidence == 0.0
