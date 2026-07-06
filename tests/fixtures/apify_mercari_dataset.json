@@ -1,0 +1,23 @@
+[
+  {
+    "listingId": "m123456789",
+    "url": "https://www.mercari.com/item/m123456789/",
+    "title": "Vintage Kenner Star Wars Boba Fett loose figure",
+    "description": "All original, minor paint wear",
+    "price": 25.0,
+    "shipping": 4.0,
+    "isAuction": false,
+    "offersAccepted": true,
+    "returnsAccepted": true,
+    "sellerFeedback": 0.97,
+    "location": "Austin, TX",
+    "images": ["https://static.mercdn.net/item/abc.jpg"]
+  },
+  {
+    "listingId": "m987654321",
+    "url": "https://www.mercari.com/item/m987654321/",
+    "title": "Vintage Kenner Star Wars weapon lot",
+    "price": 10.0,
+    "images": ["https://static.mercdn.net/item/def.jpg"]
+  }
+]
