@@ -1,7 +1,5 @@
-from typing import Any
-
 from sw_sourcing.alerts.discord import DiscordAlerts, format_alert, format_heartbeat
-from tests.unit.factories import make_listing
+from tests.unit.factories import FakeHttpxClient, make_listing
 
 
 def test_format_alert_includes_title_url_and_outcome() -> None:
@@ -71,20 +69,6 @@ def test_format_heartbeat_flags_failed_sources() -> None:
 
     assert "mercari" in payload["content"]
     assert "⚠️" in payload["content"]
-
-
-class FakeResponse:
-    def raise_for_status(self) -> None:
-        return None
-
-
-class FakeHttpxClient:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-
-    def post(self, url: str, *, json: dict[str, Any]) -> FakeResponse:
-        self.calls.append((url, json))
-        return FakeResponse()
 
 
 def test_send_posts_the_payload_to_the_webhook_url() -> None:

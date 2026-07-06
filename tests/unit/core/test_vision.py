@@ -1,5 +1,4 @@
 import json
-from collections.abc import Sequence
 from pathlib import Path
 
 from sw_sourcing.core.vision import (
@@ -9,6 +8,7 @@ from sw_sourcing.core.vision import (
     hash_image_set,
 )
 from sw_sourcing.storage.db import Database
+from tests.unit.factories import FakeVisionClient
 
 RAW_RESULT = json.dumps(
     {
@@ -54,18 +54,6 @@ RAW_RESULT = json.dumps(
         "notes": "test fixture",
     }
 )
-
-
-class FakeVisionClient:
-    def __init__(self, response: str) -> None:
-        self.response = response
-        self.calls = 0
-
-    def grade_listing(
-        self, *, images: Sequence[str], title: str, description: str
-    ) -> str:
-        self.calls += 1
-        return self.response
 
 
 def make_vision(
