@@ -1,9 +1,8 @@
 from pathlib import Path
 
-from tests.unit.factories import make_listing
-
 from sw_sourcing.core.dedupe import Dedupe
 from sw_sourcing.storage.db import Database
+from tests.unit.factories import make_listing
 
 
 def make_dedupe(tmp_path: Path) -> Dedupe:
