@@ -1,0 +1,38 @@
+{
+  "href": "https://api.ebay.com/buy/browse/v1/item_summary/search?q=vintage+kenner+star+wars",
+  "total": 2,
+  "itemSummaries": [
+    {
+      "itemId": "v1|110599777099|0",
+      "title": "Vintage Kenner Star Wars Loose Figure Lot of 12",
+      "shortDescription": "Genuine vintage Kenner figures, some wear, all original.",
+      "image": { "imageUrl": "https://i.ebayimg.com/images/g/abc/s-l500.jpg" },
+      "additionalImages": [
+        { "imageUrl": "https://i.ebayimg.com/images/g/def/s-l500.jpg" }
+      ],
+      "price": { "value": "60.00", "currency": "USD" },
+      "itemWebUrl": "https://www.ebay.com/itm/110599777099",
+      "seller": { "username": "vintagetoys123", "feedbackPercentage": "99.5" },
+      "itemLocation": { "stateOrProvince": "OH", "country": "US" },
+      "shippingOptions": [
+        { "shippingCost": { "value": "8.50", "currency": "USD" } }
+      ],
+      "buyingOptions": ["FIXED_PRICE", "BEST_OFFER"],
+      "returnTerms": { "returnsAccepted": true }
+    },
+    {
+      "itemId": "v1|110599777100|0",
+      "title": "Vintage Kenner Star Wars Blaster Weapon",
+      "image": { "imageUrl": "https://i.ebayimg.com/images/g/ghi/s-l500.jpg" },
+      "price": { "value": "15.00", "currency": "USD" },
+      "itemWebUrl": "https://www.ebay.com/itm/110599777100",
+      "seller": { "username": "toycollector99", "feedbackPercentage": "98.2" },
+      "itemLocation": { "stateOrProvince": "CA", "country": "US" },
+      "shippingOptions": [
+        { "shippingCost": { "value": "5.00", "currency": "USD" } }
+      ],
+      "buyingOptions": ["AUCTION"],
+      "returnTerms": { "returnsAccepted": false }
+    }
+  ]
+}
