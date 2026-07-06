@@ -30,6 +30,7 @@ def format_alert(
     target_grade_count: int | None = None,
     suggested_offer: float | None = None,
     max_repro_risk: str | None = None,
+    returns_accepted: bool | None = None,
 ) -> dict[str, Any]:
     """Build a Discord webhook payload for one listing decision."""
     lines = [f"{_OUTCOME_EMOJI[outcome]} **{outcome.upper()}** — {listing.title}"]
@@ -42,6 +43,8 @@ def format_alert(
         lines.append(f"Suggested offer: ${suggested_offer:.2f}")
     if max_repro_risk is not None:
         lines.append(f"Repro risk: {max_repro_risk}")
+    if returns_accepted is not None:
+        lines.append(f"Returns accepted: {'yes' if returns_accepted else 'no'}")
 
     return {"content": "\n".join(lines)}
 

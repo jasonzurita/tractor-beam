@@ -32,6 +32,16 @@ def test_format_alert_includes_optional_figures_when_given() -> None:
     assert "low" in payload["content"]
 
 
+def test_format_alert_shows_returns_accepted_when_given() -> None:
+    listing = make_listing()
+
+    accepted = format_alert(listing, "buy", returns_accepted=True)
+    not_accepted = format_alert(listing, "buy", returns_accepted=False)
+
+    assert "Returns accepted: yes" in accepted["content"]
+    assert "Returns accepted: no" in not_accepted["content"]
+
+
 def test_format_alert_omits_optional_figures_when_not_given() -> None:
     listing = make_listing()
 
