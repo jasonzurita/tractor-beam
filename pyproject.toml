@@ -1,0 +1,48 @@
+[project]
+name = "sw-sourcing"
+version = "0.1.0"
+description = "Scans marketplaces for authentic vintage Kenner Star Wars figures, grades and screens them, and alerts buy/negotiate/review decisions."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "httpx>=0.27",
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "black>=24",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["sw_sourcing*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: real network/creds calls; excluded from default run",
+]
+addopts = "-m 'not integration'"
