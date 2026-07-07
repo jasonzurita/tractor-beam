@@ -195,7 +195,7 @@ Then sort:
 | Key | Value | Meaning |
 |---|---|---|
 | `target_per_figure` | 5.00 | Buy-now threshold, $/target-grade figure |
-| `target_per_weapon` | TBD | Weapon/accessory threshold (set once you have comps) |
+| `target_per_weapon` | 8.00 (placeholder, no real comps yet) | Weapon/accessory threshold; tune once you have comps |
 | `grade_floor` | "mid" | Minimum grade counted |
 | `authenticity_required` | true | Hard gate — non-negotiable |
 | `repro_keyword_blocklist` | ["repro","reproduction","replacement","restored","custom","aftermarket","not original"] | Text screen |
@@ -301,11 +301,12 @@ tests/        unit/ fixtures/ integration/
 
 - **Facebook:** in scope for v1 (human-in-the-loop).
 - **Figures:** `$5` / mid-to-high-grade figure.
-- **Weapons/accessories:** wanted (target price TBD, configurable).
+- **Weapons/accessories:** wanted; priced as a credit toward figure-lot cost, or standalone for weapon-only lots, against `target_per_weapon` (placeholder $8.00, no real comps yet -- tune via `cli.py config set`).
+- **Rarity:** vision flags known rare/valuable variants (`rare_candidate`); always routes to manual review regardless of repro-risk score, never a pricing shortcut.
 - **Authenticity:** mandatory, 100% authentic, no repro/restored — hard gate that overrides price; in-hand authentication required before listing.
 - **Grade floor:** `mid`.
 
-Still open: weapon target pricing (needs comps); rule-of-thumb thresholds vs. a self-built sold-price database later; Discord-only review vs. Airtable from day one.
+Still open: real weapon/accessory comps (current $8.00 is a guess); rule-of-thumb thresholds vs. a self-built sold-price database later; Discord-only review vs. Airtable from day one.
 
 ---
 
