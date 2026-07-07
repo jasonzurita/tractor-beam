@@ -94,6 +94,34 @@ _ALERT_COLUMNS = (
 )
 
 
+@dataclass(frozen=True)
+class RunRecord:
+    id: int
+    started_at: str
+    sources_ok: list[str]
+    sources_failed: list[str]
+    listings_seen: int
+    alerts_sent: int
+
+
+@dataclass(frozen=True)
+class RunTotals:
+    total_runs: int
+    total_listings_seen: int
+    total_alerts_sent: int
+
+
+def _row_to_run_record(row: tuple[object, ...]) -> RunRecord:
+    return RunRecord(
+        id=row[0],  # type: ignore[arg-type]
+        started_at=row[1],  # type: ignore[arg-type]
+        sources_ok=json.loads(row[2]) if row[2] else [],  # type: ignore[arg-type]
+        sources_failed=json.loads(row[3]) if row[3] else [],  # type: ignore[arg-type]
+        listings_seen=row[4],  # type: ignore[arg-type]
+        alerts_sent=row[5],  # type: ignore[arg-type]
+    )
+
+
 def _row_to_alert_record(row: tuple[object, ...]) -> AlertRecord:
     return AlertRecord(
         id=row[0],  # type: ignore[arg-type]
@@ -297,3 +325,51 @@ class Database:
                     alerts_sent,
                 ),
             )
+
+    def get_recent_runs(self, *, limit: int) -> list[RunRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, started_at, sources_ok, sources_failed,
+                       listings_seen, alerts_sent
+                FROM runs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_row_to_run_record(row) for row in rows]
+
+    def get_run_totals(self) -> RunTotals:
+        with self._connect() as conn:
+            row = conn.execute("""
+                SELECT COUNT(*), COALESCE(SUM(listings_seen), 0),
+                       COALESCE(SUM(alerts_sent), 0)
+                FROM runs
+                """).fetchone()
+        return RunTotals(
+            total_runs=row[0], total_listings_seen=row[1], total_alerts_sent=row[2]
+        )
+
+    def get_alert_outcome_counts(self) -> dict[str, int]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT outcome, COUNT(*) FROM alerts GROUP BY outcome"
+            ).fetchall()
+        return {outcome: count for outcome, count in rows}
+
+    def get_email_batch_count(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT reported_at) FROM alerts"
+                " WHERE reported_at IS NOT NULL"
+            ).fetchone()
+        return row[0]  # type: ignore[no-any-return]
+
+    def get_recent_alerts(self, *, limit: int) -> list[AlertRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {_ALERT_COLUMNS} FROM alerts ORDER BY alerted_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [_row_to_alert_record(row) for row in rows]

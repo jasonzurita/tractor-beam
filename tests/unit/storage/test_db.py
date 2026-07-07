@@ -213,6 +213,158 @@ def test_record_run_does_not_raise(tmp_path: Path) -> None:
     )
 
 
+def test_get_recent_runs_returns_most_recent_first(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    db.record_run(
+        started_at="2026-07-06T00:00:00Z",
+        sources_ok=["ebay"],
+        sources_failed=[],
+        listings_seen=5,
+        alerts_sent=1,
+    )
+    db.record_run(
+        started_at="2026-07-07T00:00:00Z",
+        sources_ok=["ebay"],
+        sources_failed=["facebook"],
+        listings_seen=8,
+        alerts_sent=2,
+    )
+
+    runs = db.get_recent_runs(limit=10)
+
+    assert [run.started_at for run in runs] == [
+        "2026-07-07T00:00:00Z",
+        "2026-07-06T00:00:00Z",
+    ]
+    assert runs[0].sources_ok == ["ebay"]
+    assert runs[0].sources_failed == ["facebook"]
+    assert runs[0].listings_seen == 8
+    assert runs[0].alerts_sent == 2
+
+
+def test_get_recent_runs_respects_limit(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    for i in range(5):
+        db.record_run(
+            started_at=f"2026-07-0{i + 1}T00:00:00Z",
+            sources_ok=["ebay"],
+            sources_failed=[],
+            listings_seen=1,
+            alerts_sent=0,
+        )
+
+    assert len(db.get_recent_runs(limit=2)) == 2
+
+
+def test_get_recent_runs_returns_empty_list_when_no_runs_recorded(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    assert db.get_recent_runs(limit=10) == []
+
+
+def test_get_run_totals_sums_across_all_runs(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    db.record_run(
+        started_at="2026-07-06T00:00:00Z",
+        sources_ok=["ebay"],
+        sources_failed=[],
+        listings_seen=5,
+        alerts_sent=1,
+    )
+    db.record_run(
+        started_at="2026-07-07T00:00:00Z",
+        sources_ok=["ebay"],
+        sources_failed=["facebook"],
+        listings_seen=8,
+        alerts_sent=2,
+    )
+
+    totals = db.get_run_totals()
+
+    assert totals.total_runs == 2
+    assert totals.total_listings_seen == 13
+    assert totals.total_alerts_sent == 3
+
+
+def test_get_run_totals_is_all_zero_when_no_runs_recorded(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    totals = db.get_run_totals()
+
+    assert totals.total_runs == 0
+    assert totals.total_listings_seen == 0
+    assert totals.total_alerts_sent == 0
+
+
+def test_get_alert_outcome_counts_groups_by_outcome(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", outcome="buy")
+    record_sample_alert(db, listing_id="2", outcome="buy")
+    record_sample_alert(db, listing_id="3", outcome="negotiate")
+
+    assert db.get_alert_outcome_counts() == {"buy": 2, "negotiate": 1}
+
+
+def test_get_alert_outcome_counts_is_empty_when_no_alerts(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    assert db.get_alert_outcome_counts() == {}
+
+
+def test_get_email_batch_count_counts_distinct_report_sends(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1")
+    record_sample_alert(db, listing_id="2")
+
+    unreported = [alert.id for alert in db.get_unreported_alerts()]
+    db.mark_alerts_reported(unreported, reported_at="2026-07-07T00:00:00Z")
+
+    assert db.get_email_batch_count() == 1
+
+
+def test_get_email_batch_count_counts_separate_sends_separately(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1")
+    first_batch = [alert.id for alert in db.get_unreported_alerts()]
+    db.mark_alerts_reported(first_batch, reported_at="2026-07-07T00:00:00Z")
+
+    record_sample_alert(db, listing_id="2")
+    second_batch = [alert.id for alert in db.get_unreported_alerts()]
+    db.mark_alerts_reported(second_batch, reported_at="2026-07-08T00:00:00Z")
+
+    assert db.get_email_batch_count() == 2
+
+
+def test_get_email_batch_count_is_zero_when_nothing_reported(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    assert db.get_email_batch_count() == 0
+
+
+def test_get_recent_alerts_returns_most_recent_first(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(
+        db, listing_id="1", title="First", alerted_at="2026-07-06T00:00:00Z"
+    )
+    record_sample_alert(
+        db, listing_id="2", title="Second", alerted_at="2026-07-07T00:00:00Z"
+    )
+
+    recent = db.get_recent_alerts(limit=10)
+
+    assert [alert.title for alert in recent] == ["Second", "First"]
+
+
+def test_get_recent_alerts_respects_limit(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    for i in range(5):
+        record_sample_alert(
+            db, listing_id=str(i), alerted_at=f"2026-07-0{i + 1}T00:00:00Z"
+        )
+
+    assert len(db.get_recent_alerts(limit=2)) == 2
+
+
 def test_get_last_failure_report_returns_none_when_never_recorded(
     tmp_path: Path,
 ) -> None:
