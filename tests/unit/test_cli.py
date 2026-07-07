@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import httpx
@@ -5,7 +6,7 @@ import pytest
 
 import sw_sourcing.cli as cli
 from sw_sourcing import lock
-from sw_sourcing.cli import build_adapters, main, send_report
+from sw_sourcing.cli import build_adapters, configure_logging, main, send_report
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
 from tests.unit.factories import FakeSmtp
@@ -254,3 +255,24 @@ def test_config_list_prints_every_key(
     assert exit_code == 0
     assert "target_per_figure" in out
     assert "sources_enabled" in out
+
+
+def test_configure_logging_writes_to_the_configured_rotating_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log_path = tmp_path / "test.log"
+    monkeypatch.setenv("SW_SOURCING_LOG_PATH", str(log_path))
+    root = logging.getLogger()
+    original_handlers = list(root.handlers)
+    original_level = root.level
+    try:
+        configure_logging()
+        logging.getLogger("sw_sourcing.test").info("hello from the test")
+        for handler in root.handlers:
+            handler.flush()
+
+        assert log_path.exists()
+        assert "hello from the test" in log_path.read_text()
+    finally:
+        root.handlers = original_handlers
+        root.setLevel(original_level)

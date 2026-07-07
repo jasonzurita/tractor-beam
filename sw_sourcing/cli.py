@@ -9,6 +9,7 @@ import os
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,39 @@ _DEFAULT_SMTP_HOST = "smtp.gmail.com"
 _DEFAULT_SMTP_PORT = 465
 _LOCK_PATH_ENV = "SW_SOURCING_LOCK_PATH"
 _DEFAULT_LOCK_PATH = "sw_sourcing.scan.lock"
+_LOG_PATH_ENV = "SW_SOURCING_LOG_PATH"
+_DEFAULT_LOG_PATH = "sw_sourcing.log"
+_LOG_MAX_BYTES = 5 * 1024 * 1024
+_LOG_BACKUP_COUNT = 5
+
+_active_log_handler: RotatingFileHandler | None = None
+
+
+def configure_logging() -> None:
+    """Log to a size-rotated file the app manages itself, rather than
+    relying on shell `>> file` redirection (which grows unbounded) or an
+    external tool like logrotate (not available by default on macOS).
+
+    Idempotent and re-callable: replaces its own previously-installed
+    handler rather than accumulating a new one on every call (main() may
+    be invoked more than once per process in tests).
+    """
+    global _active_log_handler
+    log_path = os.environ.get(_LOG_PATH_ENV, _DEFAULT_LOG_PATH)
+    handler = RotatingFileHandler(
+        log_path, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUP_COUNT
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+
+    root = logging.getLogger()
+    if _active_log_handler is not None:
+        root.removeHandler(_active_log_handler)
+        _active_log_handler.close()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    _active_log_handler = handler
 
 
 def build_adapters(
@@ -120,7 +154,7 @@ def send_report(
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
 
     parser = argparse.ArgumentParser(prog="sw_sourcing")
     subparsers = parser.add_subparsers(dest="command", required=True)

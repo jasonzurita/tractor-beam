@@ -13,6 +13,8 @@ venv/
 *.sqlite3
 bug_reports/
 facebook_inbox/
+*.log
+*.lock
 
 .mypy_cache/
 .ruff_cache/
