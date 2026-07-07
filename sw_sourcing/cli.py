@@ -24,6 +24,7 @@ from sw_sourcing.alerts.discord import DiscordAlerts
 from sw_sourcing.alerts.email import EmailSender, format_report
 from sw_sourcing.core.dedupe import Dedupe
 from sw_sourcing.core.vision import ClaudeCliVisionClient, Vision
+from sw_sourcing.dashboard import build_dashboard_data, render_dashboard_html
 from sw_sourcing.diagnostics import DEFAULT_REPORTS_DIR, write_report
 from sw_sourcing.pipeline import Pipeline
 from sw_sourcing.storage.config import DEFAULTS as CONFIG_DEFAULTS
@@ -45,6 +46,8 @@ _LOG_PATH_ENV = "SW_SOURCING_LOG_PATH"
 _DEFAULT_LOG_PATH = "sw_sourcing.log"
 _LOG_MAX_BYTES = 5 * 1024 * 1024
 _LOG_BACKUP_COUNT = 5
+_DEFAULT_DASHBOARD_PATH = "dashboard.html"
+_DASHBOARD_RECENT_LIMIT = 20
 
 _active_log_handler: RotatingFileHandler | None = None
 
@@ -188,6 +191,15 @@ def main(argv: list[str] | None = None) -> int:
     config_set_parser.add_argument("value")
     config_subparsers.add_parser("list", help="Print every config key and its value")
 
+    dashboard_parser = subparsers.add_parser(
+        "dashboard", help="Regenerate the local HTML observability dashboard"
+    )
+    dashboard_parser.add_argument(
+        "--out",
+        default=_DEFAULT_DASHBOARD_PATH,
+        help=f"Where to write the HTML file (default: {_DEFAULT_DASHBOARD_PATH})",
+    )
+
     args = parser.parse_args(argv)
     bug_reports_dir = os.environ.get(_BUG_REPORTS_DIR_ENV, str(DEFAULT_REPORTS_DIR))
 
@@ -226,6 +238,18 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(str(exc))
             print(json.dumps(parsed_value))
             return 0
+
+    if args.command == "dashboard":
+        data = build_dashboard_data(
+            db,
+            bug_reports_dir=bug_reports_dir,
+            generated_at=datetime.now(UTC).isoformat(),
+            recent_limit=_DASHBOARD_RECENT_LIMIT,
+        )
+        out_path = Path(args.out)
+        out_path.write_text(render_dashboard_html(data))
+        print(f"Wrote {out_path}")
+        return 0
 
     if args.command == "send-report":
         try:

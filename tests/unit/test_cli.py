@@ -258,6 +258,33 @@ def test_config_list_prints_every_key(
     assert "sources_enabled" in out
 
 
+def test_dashboard_command_writes_an_html_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("SW_SOURCING_BUG_REPORTS_DIR", str(tmp_path / "bug_reports"))
+    out_path = tmp_path / "dashboard.html"
+
+    exit_code = main(["dashboard", "--out", str(out_path)])
+
+    assert exit_code == 0
+    assert out_path.exists()
+    assert "Sourcing Engine Dashboard" in out_path.read_text()
+
+
+def test_dashboard_command_defaults_to_dashboard_html_in_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("SW_SOURCING_BUG_REPORTS_DIR", str(tmp_path / "bug_reports"))
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(["dashboard"])
+
+    assert exit_code == 0
+    assert (tmp_path / "dashboard.html").exists()
+
+
 def test_configure_logging_writes_to_the_configured_rotating_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
