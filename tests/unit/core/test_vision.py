@@ -208,3 +208,17 @@ def test_extract_json_strips_fence_without_language_tag() -> None:
 def test_extract_json_drops_trailing_commentary_after_the_json_object() -> None:
     text = '{"a": 1}\nThese are genuine vintage stock.'
     assert extract_json(text) == '{"a": 1}'
+
+
+def test_extract_json_drops_a_prose_preamble_before_a_fenced_json_block() -> None:
+    text = (
+        "Based on the six photos, here is my assessment:\n"
+        '```json\n{"a": 1}\n```\n'
+        "Note: ambiguous piles."
+    )
+    assert extract_json(text) == '{"a": 1}'
+
+
+def test_extract_json_drops_a_prose_preamble_before_unfenced_json() -> None:
+    text = 'Here is my assessment: {"a": 1}'
+    assert extract_json(text) == '{"a": 1}'
