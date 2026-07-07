@@ -80,6 +80,12 @@ class FakeAdapter:
         self._listings = listings or []
         self._error = error
 
+    def set_listings(self, listings: list[Listing]) -> None:
+        """Change what the next fetch() returns -- simulates a re-scan
+        seeing the same source with updated listing data (e.g. a price
+        change)."""
+        self._listings = listings
+
     def fetch(self) -> list[Listing]:
         if self._error is not None:
             raise self._error

@@ -8,30 +8,6 @@ def make_db(tmp_path: Path) -> Database:
     return Database(tmp_path / "test.db")
 
 
-def test_unseen_listing_reports_not_seen(tmp_path: Path) -> None:
-    db = make_db(tmp_path)
-    assert not db.has_seen("ebay", "123")
-
-
-def test_marking_seen_makes_has_seen_true(tmp_path: Path) -> None:
-    db = make_db(tmp_path)
-    db.mark_seen("ebay", "123", seen_at="2026-07-06T00:00:00Z")
-    assert db.has_seen("ebay", "123")
-
-
-def test_marking_seen_twice_updates_last_seen_without_raising(tmp_path: Path) -> None:
-    db = make_db(tmp_path)
-    db.mark_seen("ebay", "123", seen_at="2026-07-06T00:00:00Z")
-    db.mark_seen("ebay", "123", seen_at="2026-07-07T00:00:00Z")
-    assert db.has_seen("ebay", "123")
-
-
-def test_seen_is_scoped_per_source(tmp_path: Path) -> None:
-    db = make_db(tmp_path)
-    db.mark_seen("ebay", "123", seen_at="2026-07-06T00:00:00Z")
-    assert not db.has_seen("mercari", "123")
-
-
 def test_vision_cache_miss_returns_none(tmp_path: Path) -> None:
     db = make_db(tmp_path)
     assert db.get_vision_cache("hash1") is None
@@ -79,6 +55,7 @@ def record_sample_alert(db: Database, **overrides: object) -> None:
         "returns_accepted": True,
         "suggested_offer": None,
         "vision_notes": None,
+        "price": 45.0,
         "alerted_at": "2026-07-06T00:00:00Z",
     }
     defaults.update(overrides)
@@ -141,6 +118,63 @@ def test_opening_a_pre_vision_notes_db_migrates_the_column(tmp_path: Path) -> No
     record_sample_alert(db, listing_id="1")
 
     assert db.get_unreported_alerts()[0].vision_notes is None
+
+
+def test_opening_a_pre_price_column_db_migrates_the_column(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE alerts (
+            id INTEGER PRIMARY KEY,
+            source TEXT NOT NULL,
+            listing_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            image_url TEXT,
+            outcome TEXT NOT NULL,
+            cost_per_figure REAL,
+            target_grade_count INTEGER,
+            max_repro_risk TEXT,
+            returns_accepted INTEGER,
+            suggested_offer REAL,
+            vision_notes TEXT,
+            alerted_at TEXT NOT NULL,
+            reported_at TEXT
+        )
+        """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    record_sample_alert(db, listing_id="1", price=12.5)
+
+    assert db.get_unreported_alerts()[0].price == 12.5
+
+
+def test_has_alerted_is_false_for_a_never_alerted_combo(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    assert not db.has_alerted("ebay", "1", outcome="buy", price=10.0)
+
+
+def test_has_alerted_is_true_after_recording_that_exact_combo(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", outcome="buy", price=10.0)
+
+    assert db.has_alerted("ebay", "1", outcome="buy", price=10.0)
+
+
+def test_has_alerted_is_false_when_price_differs(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", outcome="buy", price=10.0)
+
+    assert not db.has_alerted("ebay", "1", outcome="buy", price=5.0)
+
+
+def test_has_alerted_is_false_when_outcome_differs(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", outcome="review", price=10.0)
+
+    assert not db.has_alerted("ebay", "1", outcome="buy", price=10.0)
 
 
 def test_marking_reported_removes_it_from_unreported(tmp_path: Path) -> None:

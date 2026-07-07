@@ -1,4 +1,6 @@
-"""Seen-listing check: a listing is processed and alerted at most once."""
+"""Alert-level dedupe: a listing is re-alerted only if its outcome or price
+has changed since the last alert for it -- a re-fetched, already-graded
+listing at an unchanged price and outcome is not re-alerted."""
 
 from __future__ import annotations
 
@@ -10,8 +12,7 @@ class Dedupe:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def is_new(self, listing: Listing) -> bool:
-        return not self._db.has_seen(listing.source, listing.listing_id)
-
-    def mark_processed(self, listing: Listing, *, seen_at: str) -> None:
-        self._db.mark_seen(listing.source, listing.listing_id, seen_at=seen_at)
+    def already_alerted(self, listing: Listing, *, outcome: str) -> bool:
+        return self._db.has_alerted(
+            listing.source, listing.listing_id, outcome=outcome, price=listing.price
+        )

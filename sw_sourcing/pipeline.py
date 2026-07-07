@@ -1,9 +1,9 @@
 """Orchestrates one pipeline run.
 
-adapters -> prefilter + repro-text screen -> dedupe -> vision -> decision
--> negotiation -> alerts, with per-adapter and per-listing isolation and a
-heartbeat run summary. Wires together core/, storage/, and alerts/ -- it
-reimplements none of their logic.
+adapters -> prefilter + repro-text screen -> vision -> decision ->
+negotiation -> alert-dedupe -> alerts, with per-adapter and per-listing
+isolation and a heartbeat run summary. Wires together core/, storage/, and
+alerts/ -- it reimplements none of their logic.
 """
 
 from __future__ import annotations
@@ -154,9 +154,6 @@ class Pipeline:
         run_summary.bug_reports_written += 1
 
     def _process(self, listing: Listing, summary: RunSummary) -> None:
-        if not self._dedupe.is_new(listing):
-            return
-
         if not passes_prefilter(
             listing,
             required_keywords=self._config.get("prefilter_required_keywords"),
@@ -170,22 +167,26 @@ class Pipeline:
         ):
             return
 
+        # Grading is billed once per image set (see vision_cache) regardless
+        # of how many times a still-live listing is re-fetched, so re-running
+        # this on every scan costs nothing extra on a repeat listing -- it's
+        # what lets a later price change on the same listing get a fresh
+        # decision instead of being silently dropped forever.
         vision_result = self._vision.grade(
             images=[str(url) for url in listing.images],
             title=listing.title,
             description=listing.description,
             graded_at=datetime.now(UTC).isoformat(),
         )
-        # Marked only after a successful grade, so a transient grading
-        # failure (bad model output, network error) leaves the listing
-        # retryable on the next run instead of dropping it forever.
-        self._dedupe.mark_processed(listing, seen_at=datetime.now(UTC).isoformat())
         target_grade_count = vision_result.target_grade_count(
             grade_floor=self._config.get("grade_floor")
         )
 
         outcome = self._decide(listing, vision_result, target_grade_count)
         if outcome not in _ALERTED_OUTCOMES:
+            return
+
+        if self._dedupe.already_alerted(listing, outcome=outcome):
             return
 
         self._alert(listing, vision_result, target_grade_count, outcome)
@@ -265,5 +266,6 @@ class Pipeline:
             returns_accepted=listing.returns_accepted,
             suggested_offer=offer,
             vision_notes=vision_result.notes or None,
+            price=listing.price,
             alerted_at=datetime.now(UTC).isoformat(),
         )

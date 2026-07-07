@@ -18,6 +18,7 @@ def make_alert(**overrides: object) -> AlertRecord:
         "returns_accepted": True,
         "suggested_offer": None,
         "vision_notes": None,
+        "price": 45.0,
         "alerted_at": "2026-07-07T12:00:00Z",
         "reported_at": None,
     }

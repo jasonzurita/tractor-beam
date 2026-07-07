@@ -13,14 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS seen_listings (
-    source TEXT NOT NULL,
-    listing_id TEXT NOT NULL,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    PRIMARY KEY (source, listing_id)
-);
-
 CREATE TABLE IF NOT EXISTS vision_cache (
     image_set_hash TEXT PRIMARY KEY,
     result_json TEXT NOT NULL,
@@ -41,6 +33,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     returns_accepted INTEGER,
     suggested_offer REAL,
     vision_notes TEXT,
+    price REAL,
     alerted_at TEXT NOT NULL,
     reported_at TEXT
 );
@@ -70,6 +63,7 @@ CREATE TABLE IF NOT EXISTS failure_reports (
 # need an explicit ALTER TABLE here, checked against what's actually there.
 _ALERT_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
     ("vision_notes", "ALTER TABLE alerts ADD COLUMN vision_notes TEXT"),
+    ("price", "ALTER TABLE alerts ADD COLUMN price REAL"),
 ]
 
 
@@ -88,6 +82,7 @@ class AlertRecord:
     returns_accepted: bool
     suggested_offer: float | None
     vision_notes: str | None
+    price: float | None
     alerted_at: str
     reported_at: str | None
 
@@ -95,7 +90,7 @@ class AlertRecord:
 _ALERT_COLUMNS = (
     "id, source, listing_id, title, url, image_url, outcome, cost_per_figure,"
     " target_grade_count, max_repro_risk, returns_accepted, suggested_offer,"
-    " vision_notes, alerted_at, reported_at"
+    " vision_notes, price, alerted_at, reported_at"
 )
 
 
@@ -114,8 +109,9 @@ def _row_to_alert_record(row: tuple[object, ...]) -> AlertRecord:
         returns_accepted=bool(row[10]),
         suggested_offer=row[11],  # type: ignore[arg-type]
         vision_notes=row[12],  # type: ignore[arg-type]
-        alerted_at=row[13],  # type: ignore[arg-type]
-        reported_at=row[14],  # type: ignore[arg-type]
+        price=row[13],  # type: ignore[arg-type]
+        alerted_at=row[14],  # type: ignore[arg-type]
+        reported_at=row[15],  # type: ignore[arg-type]
     )
 
 
@@ -143,25 +139,18 @@ class Database:
         finally:
             conn.close()
 
-    def has_seen(self, source: str, listing_id: str) -> bool:
+    def has_alerted(
+        self, source: str, listing_id: str, *, outcome: str, price: float
+    ) -> bool:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT 1 FROM seen_listings WHERE source = ? AND listing_id = ?",
-                (source, listing_id),
+                """
+                SELECT 1 FROM alerts
+                WHERE source = ? AND listing_id = ? AND outcome = ? AND price = ?
+                """,
+                (source, listing_id, outcome, price),
             ).fetchone()
         return row is not None
-
-    def mark_seen(self, source: str, listing_id: str, *, seen_at: str) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO seen_listings (source, listing_id, first_seen, last_seen)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (source, listing_id)
-                DO UPDATE SET last_seen = excluded.last_seen
-                """,
-                (source, listing_id, seen_at, seen_at),
-            )
 
     def get_vision_cache(self, image_set_hash: str) -> str | None:
         with self._connect() as conn:
@@ -217,6 +206,7 @@ class Database:
         returns_accepted: bool,
         suggested_offer: float | None,
         vision_notes: str | None,
+        price: float | None,
         alerted_at: str,
     ) -> None:
         with self._connect() as conn:
@@ -225,8 +215,9 @@ class Database:
                 INSERT INTO alerts (
                     source, listing_id, title, url, image_url, outcome,
                     cost_per_figure, target_grade_count, max_repro_risk,
-                    returns_accepted, suggested_offer, vision_notes, alerted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    returns_accepted, suggested_offer, vision_notes, price,
+                    alerted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -241,6 +232,7 @@ class Database:
                     int(returns_accepted),
                     suggested_offer,
                     vision_notes,
+                    price,
                     alerted_at,
                 ),
             )
