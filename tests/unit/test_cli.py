@@ -188,3 +188,69 @@ def test_scan_skips_cleanly_when_a_previous_scan_is_still_running(
         exit_code = main(["scan"])
 
     assert exit_code == 0
+
+
+def test_config_get_prints_the_current_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+
+    exit_code = main(["config", "get", "target_per_figure"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out.strip() == "5.0"
+
+
+def test_config_set_then_get_round_trips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+
+    main(["config", "set", "target_per_figure", "6.5"])
+    capsys.readouterr()
+    main(["config", "get", "target_per_figure"])
+
+    assert capsys.readouterr().out.strip() == "6.5"
+
+
+def test_config_set_accepts_json_lists_and_bools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+
+    main(["config", "set", "sources_enabled", '["ebay"]'])
+    capsys.readouterr()
+    main(["config", "get", "sources_enabled"])
+
+    assert capsys.readouterr().out.strip() == '["ebay"]'
+
+
+def test_config_get_rejects_an_unknown_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+
+    with pytest.raises(SystemExit):
+        main(["config", "get", "not_a_real_key"])
+
+
+def test_config_set_rejects_invalid_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+
+    with pytest.raises(SystemExit):
+        main(["config", "set", "target_per_figure", "not-json"])
+
+
+def test_config_list_prints_every_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+
+    exit_code = main(["config", "list"])
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "target_per_figure" in out
+    assert "sources_enabled" in out

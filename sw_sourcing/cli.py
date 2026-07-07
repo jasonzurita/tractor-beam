@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -24,6 +25,7 @@ from sw_sourcing.core.dedupe import Dedupe
 from sw_sourcing.core.vision import ClaudeCliVisionClient, Vision
 from sw_sourcing.diagnostics import DEFAULT_REPORTS_DIR, write_report
 from sw_sourcing.pipeline import Pipeline
+from sw_sourcing.storage.config import DEFAULTS as CONFIG_DEFAULTS
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
 
@@ -137,6 +139,21 @@ def main(argv: list[str] | None = None) -> int:
         "note", help="Free-text description of what looked wrong"
     )
 
+    config_parser = subparsers.add_parser(
+        "config", help="Get or set a threshold in the config table"
+    )
+    config_subparsers = config_parser.add_subparsers(
+        dest="config_action", required=True
+    )
+    config_get_parser = config_subparsers.add_parser("get", help="Print a config value")
+    config_get_parser.add_argument("key")
+    config_set_parser = config_subparsers.add_parser(
+        "set", help='Set a config value (JSON-encoded, e.g. 5.0 or \'["a","b"]\')'
+    )
+    config_set_parser.add_argument("key")
+    config_set_parser.add_argument("value")
+    config_subparsers.add_parser("list", help="Print every config key and its value")
+
     args = parser.parse_args(argv)
     bug_reports_dir = os.environ.get(_BUG_REPORTS_DIR_ENV, str(DEFAULT_REPORTS_DIR))
 
@@ -150,6 +167,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     db = Database(Path(os.environ.get(_DB_PATH_ENV, _DEFAULT_DB_PATH)))
+
+    if args.command == "config":
+        config = Config(db)
+        if args.config_action == "list":
+            for key in sorted(CONFIG_DEFAULTS):
+                print(f"{key} = {json.dumps(config.get(key))}")
+            return 0
+        if args.config_action == "get":
+            try:
+                value = config.get(args.key)
+            except KeyError as exc:
+                parser.error(str(exc))
+            print(json.dumps(value))
+            return 0
+        if args.config_action == "set":
+            try:
+                parsed_value = json.loads(args.value)
+            except json.JSONDecodeError as exc:
+                parser.error(f"value must be JSON-encoded: {exc}")
+            try:
+                config.set(args.key, parsed_value)
+            except KeyError as exc:
+                parser.error(str(exc))
+            print(json.dumps(parsed_value))
+            return 0
 
     if args.command == "send-report":
         try:
