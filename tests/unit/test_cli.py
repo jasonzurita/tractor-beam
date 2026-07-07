@@ -3,6 +3,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+import sw_sourcing.cli as cli
+from sw_sourcing import lock
 from sw_sourcing.cli import build_adapters, main, send_report
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
@@ -165,3 +167,24 @@ def test_send_report_is_a_noop_when_nothing_is_unreported(tmp_path: Path) -> Non
 
     assert count == 0
     assert smtp.sent_messages == []
+
+
+def test_scan_skips_cleanly_when_a_previous_scan_is_still_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "scan.lock"
+    monkeypatch.setenv("SW_SOURCING_LOCK_PATH", str(lock_path))
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError(
+            "build_adapters should not run while another scan holds the lock"
+        )
+
+    monkeypatch.setattr(cli, "build_adapters", _boom)
+
+    with lock.acquire(lock_path) as acquired:
+        assert acquired
+        exit_code = main(["scan"])
+
+    assert exit_code == 0

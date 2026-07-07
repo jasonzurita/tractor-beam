@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 
+from sw_sourcing import lock
 from sw_sourcing.adapters.base import Adapter
 from sw_sourcing.adapters.ebay import EbayAdapter, get_ebay_access_token
 from sw_sourcing.adapters.facebook_assist import FacebookAssistAdapter
@@ -35,6 +36,8 @@ _DEFAULT_FACEBOOK_INBOX = "facebook_inbox"
 _BUG_REPORTS_DIR_ENV = "SW_SOURCING_BUG_REPORTS_DIR"
 _DEFAULT_SMTP_HOST = "smtp.gmail.com"
 _DEFAULT_SMTP_PORT = 465
+_LOCK_PATH_ENV = "SW_SOURCING_LOCK_PATH"
+_DEFAULT_LOCK_PATH = "sw_sourcing.scan.lock"
 
 
 def build_adapters(
@@ -170,50 +173,56 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Report: %s alert(s) sent", count)
         return 0
 
-    config = Config(db)
-    discord_webhook = os.environ.get("DISCORD_WEBHOOK_URL")
+    lock_path = os.environ.get(_LOCK_PATH_ENV, _DEFAULT_LOCK_PATH)
+    with lock.acquire(lock_path) as acquired:
+        if not acquired:
+            logger.info("Another scan is already running; skipping this run.")
+            return 0
 
-    try:
-        adapters = build_adapters(config, bug_reports_dir=bug_reports_dir)
+        config = Config(db)
+        discord_webhook = os.environ.get("DISCORD_WEBHOOK_URL")
 
-        if args.source is not None:
-            if args.source not in adapters:
-                parser.error(
-                    f"unknown or unwired source: {args.source!r} "
-                    f"(available: {sorted(adapters)})"
-                )
-            adapters = {args.source: adapters[args.source]}
+        try:
+            adapters = build_adapters(config, bug_reports_dir=bug_reports_dir)
 
-        pipeline = Pipeline(
-            adapters=adapters,
-            dedupe=Dedupe(db),
-            vision=Vision(ClaudeCliVisionClient(), db),
-            config=config,
-            db=db,
-            alerts=DiscordAlerts(discord_webhook) if discord_webhook else None,
-            bug_reports_dir=bug_reports_dir,
+            if args.source is not None:
+                if args.source not in adapters:
+                    parser.error(
+                        f"unknown or unwired source: {args.source!r} "
+                        f"(available: {sorted(adapters)})"
+                    )
+                adapters = {args.source: adapters[args.source]}
+
+            pipeline = Pipeline(
+                adapters=adapters,
+                dedupe=Dedupe(db),
+                vision=Vision(ClaudeCliVisionClient(), db),
+                config=config,
+                db=db,
+                alerts=DiscordAlerts(discord_webhook) if discord_webhook else None,
+                bug_reports_dir=bug_reports_dir,
+            )
+            summary = pipeline.run()
+        except Exception as exc:
+            logger.exception("Unhandled error during scan; see bug_reports/")
+            write_report(
+                summary="Unhandled error during scan",
+                context={"source_filter": args.source},
+                exception=exc,
+                reports_dir=bug_reports_dir,
+            )
+            return 1
+
+        logger.info(
+            "Run complete: ok=%s failed=%s listings_seen=%s alerts_sent=%s"
+            " bug_reports=%s",
+            summary.sources_ok,
+            summary.sources_failed,
+            summary.listings_seen,
+            summary.alerts_sent,
+            summary.bug_reports_written,
         )
-        summary = pipeline.run()
-    except Exception as exc:
-        logger.exception("Unhandled error during scan; see bug_reports/")
-        write_report(
-            summary="Unhandled error during scan",
-            context={"source_filter": args.source},
-            exception=exc,
-            reports_dir=bug_reports_dir,
-        )
-        return 1
-
-    logger.info(
-        "Run complete: ok=%s failed=%s listings_seen=%s alerts_sent=%s"
-        " bug_reports=%s",
-        summary.sources_ok,
-        summary.sources_failed,
-        summary.listings_seen,
-        summary.alerts_sent,
-        summary.bug_reports_written,
-    )
-    return 0
+        return 0
 
 
 if __name__ == "__main__":
