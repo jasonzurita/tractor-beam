@@ -4,8 +4,9 @@ Sends all of a listing's photos in one request; parses the strict JSON
 response; deterministically recomputes `target_grade_count` and
 `authentic_weapon_count` from the itemized results — the model's own
 aggregate is advisory only and never trusted for cost/decision math. Caches
-by a hash of the listing's full image set so a listing is never billed
-twice.
+by a hash of the listing's full image set plus its title and description,
+so a listing is never billed twice for the same content, but an edited
+title/description (which Claude also reads) still gets a fresh grade.
 """
 
 from __future__ import annotations
@@ -129,9 +130,13 @@ class VisionClient(Protocol):
         ...
 
 
-def hash_image_set(images: Sequence[str]) -> str:
-    """Stable, order-independent hash of a listing's full image set."""
-    canonical = "|".join(sorted(images))
+def hash_listing_content(*, images: Sequence[str], title: str, description: str) -> str:
+    """Stable hash of what Claude actually reads for one grading request:
+    the full image set (order-independent) plus the listing's title and
+    description -- so an edited title/description invalidates the cache
+    even when the photos haven't changed."""
+    canonical_images = "|".join(sorted(images))
+    canonical = f"{canonical_images}::{title}::{description}"
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -140,17 +145,24 @@ class Vision:
         self._client = client
         self._db = db
 
-    def has_cached_grade(self, images: Sequence[str]) -> bool:
-        """Whether this exact image set already has a cached grade -- a
-        free hash lookup, so callers can check "will this cost a fresh
-        grading call" without actually billing one."""
-        return self._db.get_vision_cache(hash_image_set(images)) is not None
+    def has_cached_grade(
+        self, *, images: Sequence[str], title: str, description: str
+    ) -> bool:
+        """Whether this exact images/title/description combo already has a
+        cached grade -- a free hash lookup, so callers can check "will this
+        cost a fresh grading call" without actually billing one."""
+        content_hash = hash_listing_content(
+            images=images, title=title, description=description
+        )
+        return self._db.get_vision_cache(content_hash) is not None
 
     def grade(
         self, *, images: Sequence[str], title: str, description: str, graded_at: str
     ) -> VisionResult:
-        image_set_hash = hash_image_set(images)
-        cached = self._db.get_vision_cache(image_set_hash)
+        content_hash = hash_listing_content(
+            images=images, title=title, description=description
+        )
+        cached = self._db.get_vision_cache(content_hash)
         if cached is not None:
             return VisionResult.model_validate_json(cached)
 
@@ -159,7 +171,7 @@ class Vision:
         )
         result = VisionResult.model_validate_json(raw)
         self._db.put_vision_cache(
-            image_set_hash, result.model_dump_json(), created_at=graded_at
+            content_hash, result.model_dump_json(), created_at=graded_at
         )
         return result
 

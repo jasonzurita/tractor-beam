@@ -5,7 +5,7 @@ from sw_sourcing.core.vision import (
     Vision,
     build_prompt,
     extract_json,
-    hash_image_set,
+    hash_listing_content,
 )
 from sw_sourcing.storage.db import Database
 from tests.unit.factories import FakeVisionClient
@@ -228,7 +228,7 @@ def test_cache_hit_never_calls_the_client_again(tmp_path: Path) -> None:
 
 def test_has_cached_grade_is_false_before_grading(tmp_path: Path) -> None:
     vision, _ = make_vision(tmp_path)
-    assert not vision.has_cached_grade(["a", "b"])
+    assert not vision.has_cached_grade(images=["a", "b"], title="t", description="d")
 
 
 def test_has_cached_grade_is_true_after_grading(tmp_path: Path) -> None:
@@ -239,12 +239,25 @@ def test_has_cached_grade_is_true_after_grading(tmp_path: Path) -> None:
         description="d",
         graded_at="2026-07-06T00:00:00Z",
     )
-    assert vision.has_cached_grade(["a", "b"])
+    assert vision.has_cached_grade(images=["a", "b"], title="t", description="d")
+
+
+def test_has_cached_grade_is_false_when_the_title_changed(tmp_path: Path) -> None:
+    vision, _ = make_vision(tmp_path)
+    vision.grade(
+        images=["a", "b"],
+        title="t",
+        description="d",
+        graded_at="2026-07-06T00:00:00Z",
+    )
+    assert not vision.has_cached_grade(
+        images=["a", "b"], title="edited title", description="d"
+    )
 
 
 def test_has_cached_grade_never_calls_the_client(tmp_path: Path) -> None:
     vision, client = make_vision(tmp_path)
-    vision.has_cached_grade(["a", "b"])
+    vision.has_cached_grade(images=["a", "b"], title="t", description="d")
     assert client.calls == 0
 
 
@@ -263,12 +276,28 @@ def test_empty_items_never_crash_the_derived_properties(tmp_path: Path) -> None:
     assert result.rare_items_summary == ""
 
 
-def test_hash_image_set_is_order_independent() -> None:
-    assert hash_image_set(["a", "b"]) == hash_image_set(["b", "a"])
+def test_hash_listing_content_is_order_independent_for_images() -> None:
+    assert hash_listing_content(
+        images=["a", "b"], title="t", description="d"
+    ) == hash_listing_content(images=["b", "a"], title="t", description="d")
 
 
-def test_hash_image_set_differs_for_different_sets() -> None:
-    assert hash_image_set(["a", "b"]) != hash_image_set(["a", "c"])
+def test_hash_listing_content_differs_for_different_images() -> None:
+    assert hash_listing_content(
+        images=["a", "b"], title="t", description="d"
+    ) != hash_listing_content(images=["a", "c"], title="t", description="d")
+
+
+def test_hash_listing_content_differs_for_different_titles() -> None:
+    assert hash_listing_content(
+        images=["a"], title="t1", description="d"
+    ) != hash_listing_content(images=["a"], title="t2", description="d")
+
+
+def test_hash_listing_content_differs_for_different_descriptions() -> None:
+    assert hash_listing_content(
+        images=["a"], title="t", description="d1"
+    ) != hash_listing_content(images=["a"], title="t", description="d2")
 
 
 def test_build_prompt_includes_title_description_and_each_image_path() -> None:
