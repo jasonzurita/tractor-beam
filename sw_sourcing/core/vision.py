@@ -140,6 +140,12 @@ class Vision:
         self._client = client
         self._db = db
 
+    def has_cached_grade(self, images: Sequence[str]) -> bool:
+        """Whether this exact image set already has a cached grade -- a
+        free hash lookup, so callers can check "will this cost a fresh
+        grading call" without actually billing one."""
+        return self._db.get_vision_cache(hash_image_set(images)) is not None
+
     def grade(
         self, *, images: Sequence[str], title: str, description: str, graded_at: str
     ) -> VisionResult:

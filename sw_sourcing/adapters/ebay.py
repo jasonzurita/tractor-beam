@@ -109,14 +109,19 @@ class EbayAdapter:
             base_url="https://api.ebay.com", timeout=15.0
         )
 
-    def fetch(self) -> list[Listing]:
+    def fetch(self, *, offset: int = 0) -> list[Listing]:
         response = self._client.get(
             "/buy/browse/v1/item_summary/search",
             # Sorted newest-first, not eBay's default best-match relevance --
             # otherwise a periodic re-scan would keep re-fetching the same
             # top-50 static "best match" page and never see fresh inventory
             # that ranks outside it.
-            params={"q": self._query, "limit": 50, "sort": "newlyListed"},
+            params={
+                "q": self._query,
+                "limit": 50,
+                "sort": "newlyListed",
+                "offset": offset,
+            },
             headers={
                 "Authorization": f"Bearer {self._app_token}",
                 "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",

@@ -35,6 +35,13 @@ DEFAULTS: dict[str, Any] = {
     # spec table, added when wiring the pipeline together.
     "prefilter_required_keywords": ["kenner", "vintage", "star wars"],
     "prefilter_max_listing_price": 500.00,
+    # How many listings per run should get a *fresh* (non-cache-hit) vision
+    # grade before a source stops paging for more, and the hard cap on how
+    # many pages it'll fetch trying to reach that -- without the cap, a
+    # source with fewer than the budget's worth of ever-new listings would
+    # page indefinitely looking for fresh ones that don't exist.
+    "vision_analysis_budget_per_run": 50,
+    "max_fetch_pages_per_source": 5,
 }
 
 

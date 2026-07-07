@@ -61,3 +61,9 @@ def test_default_prefilter_keywords_and_price_ceiling_are_set(tmp_path: Path) ->
     config = make_config(tmp_path)
     assert "kenner" in config.get("prefilter_required_keywords")
     assert config.get("prefilter_max_listing_price") == 500.00
+
+
+def test_default_vision_analysis_budget_and_page_cap_are_set(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    assert config.get("vision_analysis_budget_per_run") == 50
+    assert config.get("max_fetch_pages_per_source") == 5

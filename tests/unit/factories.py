@@ -72,24 +72,38 @@ class FakeHttpxClient:
 
 
 class FakeAdapter:
-    """A canned Adapter -- returns preset listings or raises on fetch()."""
+    """A canned Adapter -- returns preset listings or raises on fetch().
+
+    `pages`, keyed by the exact offset the pipeline will request, lets a
+    test control multi-page pagination; a plain `listings` list only ever
+    answers offset 0 (matching a real single-page source).
+    """
 
     def __init__(
-        self, listings: list[Listing] | None = None, *, error: Exception | None = None
+        self,
+        listings: list[Listing] | None = None,
+        *,
+        error: Exception | None = None,
+        pages: dict[int, list[Listing]] | None = None,
     ) -> None:
         self._listings = listings or []
         self._error = error
+        self._pages = pages
+        self.fetch_offsets: list[int] = []
 
     def set_listings(self, listings: list[Listing]) -> None:
-        """Change what the next fetch() returns -- simulates a re-scan
-        seeing the same source with updated listing data (e.g. a price
-        change)."""
+        """Change what offset 0 returns -- simulates a re-scan seeing the
+        same source with updated listing data (e.g. a price change)."""
         self._listings = listings
+        self._pages = None
 
-    def fetch(self) -> list[Listing]:
+    def fetch(self, *, offset: int = 0) -> list[Listing]:
+        self.fetch_offsets.append(offset)
         if self._error is not None:
             raise self._error
-        return self._listings
+        if self._pages is not None:
+            return self._pages.get(offset, [])
+        return self._listings if offset == 0 else []
 
 
 class FakeSmtp:

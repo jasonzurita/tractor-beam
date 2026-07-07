@@ -55,7 +55,11 @@ class FacebookAssistAdapter:
     def __init__(self, inbox_dir: str | Path) -> None:
         self._inbox_dir = Path(inbox_dir)
 
-    def fetch(self) -> list[Listing]:
+    def fetch(self, *, offset: int = 0) -> list[Listing]:
+        # No real pagination concept for a one-shot inbox drain -- the
+        # first call already returns everything there was to see.
+        if offset > 0:
+            return []
         fetched_at = datetime.now(UTC)
         listings: list[Listing] = []
         for path in sorted(self._inbox_dir.glob("*.json")):

@@ -72,7 +72,7 @@ class Pipeline:
 
         for source, adapter in self._adapters.items():
             try:
-                listings = adapter.fetch()
+                listings = self._fetch_for_analysis(adapter)
             except Exception as exc:
                 logger.exception("Adapter %s failed; skipping this run", source)
                 summary.sources_failed.append(source)
@@ -126,6 +126,54 @@ class Pipeline:
             )
         return summary
 
+    def _fetch_for_analysis(self, adapter: Adapter) -> list[Listing]:
+        """Pages an adapter until enough listings need a *fresh* vision
+        grade to fill this run's analysis budget, the source runs out of
+        listings, or a safety cap on page fetches is hit.
+
+        A single page (e.g. eBay's newest-50) can be mostly listings this
+        pipeline has already graded before -- without paging deeper on
+        those runs, the pipeline would look busy while barely analyzing
+        anything new.
+        """
+        budget = self._config.get("vision_analysis_budget_per_run")
+        max_pages = self._config.get("max_fetch_pages_per_source")
+
+        listings: list[Listing] = []
+        fresh_count = 0
+        offset = 0
+        for _ in range(max_pages):
+            page = adapter.fetch(offset=offset)
+            if not page:
+                break
+            listings.extend(page)
+            fresh_count += sum(
+                1 for listing in page if self._needs_fresh_analysis(listing)
+            )
+            offset += len(page)
+            if fresh_count >= budget:
+                break
+        return listings
+
+    def _needs_fresh_analysis(self, listing: Listing) -> bool:
+        if not self._passes_free_screen(listing):
+            return False
+        return not self._vision.has_cached_grade([str(url) for url in listing.images])
+
+    def _passes_free_screen(self, listing: Listing) -> bool:
+        if not passes_prefilter(
+            listing,
+            required_keywords=self._config.get("prefilter_required_keywords"),
+            max_listing_price=self._config.get("prefilter_max_listing_price"),
+        ):
+            return False
+        if is_disclosed_repro(
+            f"{listing.title} {listing.description}",
+            blocklist=self._config.get("repro_keyword_blocklist"),
+        ):
+            return False
+        return True
+
     def _maybe_write_report(
         self,
         *,
@@ -154,17 +202,7 @@ class Pipeline:
         run_summary.bug_reports_written += 1
 
     def _process(self, listing: Listing, summary: RunSummary) -> None:
-        if not passes_prefilter(
-            listing,
-            required_keywords=self._config.get("prefilter_required_keywords"),
-            max_listing_price=self._config.get("prefilter_max_listing_price"),
-        ):
-            return
-
-        if is_disclosed_repro(
-            f"{listing.title} {listing.description}",
-            blocklist=self._config.get("repro_keyword_blocklist"),
-        ):
+        if not self._passes_free_screen(listing):
             return
 
         # Grading is billed once per image set (see vision_cache) regardless

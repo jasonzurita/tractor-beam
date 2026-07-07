@@ -3,7 +3,7 @@ from pathlib import Path
 
 from sw_sourcing.alerts.discord import DiscordAlerts
 from sw_sourcing.core.dedupe import Dedupe
-from sw_sourcing.core.vision import Vision
+from sw_sourcing.core.vision import Vision, hash_image_set
 from sw_sourcing.pipeline import Pipeline
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
@@ -197,6 +197,79 @@ def test_run_realerts_when_a_previously_skipped_listing_drops_in_price(
 
     assert second.alerts_sent == 1  # same listing, price dropped into buy range
     assert vision_client.calls == 1  # same images -> vision_cache hit, no re-billing
+
+
+def test_run_pages_deeper_when_the_first_page_has_no_fresh_listings(
+    tmp_path: Path,
+) -> None:
+    stale = make_listing(
+        listing_id="stale-1", price=10.0, images=["https://example.com/stale.jpg"]
+    )
+    fresh = make_listing(
+        listing_id="fresh-1", price=10.0, images=["https://example.com/fresh.jpg"]
+    )
+    adapter = FakeAdapter(pages={0: [stale], 1: [fresh]})
+    pipeline, vision_client, _, db = make_pipeline(
+        tmp_path, {"ebay": adapter}, vision_response=BUY_RESULT
+    )
+    Config(db).set("vision_analysis_budget_per_run", 1)
+    # Pre-cache `stale`'s grade so page 0 contributes zero *fresh* analyses,
+    # forcing the pipeline to page deeper to fill the budget of 1.
+    db.put_vision_cache(
+        hash_image_set(["https://example.com/stale.jpg"]),
+        BUY_RESULT,
+        created_at="2026-07-06T00:00:00Z",
+    )
+
+    summary = pipeline.run()
+
+    assert adapter.fetch_offsets == [0, 1]
+    assert summary.listings_seen == 2
+    assert vision_client.calls == 1  # stale: cache hit; fresh: one real grading call
+
+
+def test_run_stops_paging_once_the_analysis_budget_is_met(tmp_path: Path) -> None:
+    first_page = [
+        make_listing(listing_id="a", price=10.0, images=["https://example.com/a.jpg"])
+    ]
+    second_page = [
+        make_listing(listing_id="b", price=10.0, images=["https://example.com/b.jpg"])
+    ]
+    adapter = FakeAdapter(pages={0: first_page, 1: second_page})
+    pipeline, _, _, db = make_pipeline(
+        tmp_path, {"ebay": adapter}, vision_response=BUY_RESULT
+    )
+    Config(db).set("vision_analysis_budget_per_run", 1)
+
+    summary = pipeline.run()
+
+    assert adapter.fetch_offsets == [0]  # budget met on page 0; page 1 never fetched
+    assert summary.listings_seen == 1
+
+
+def test_run_stops_paging_at_the_max_fetch_pages_safety_cap(tmp_path: Path) -> None:
+    pages = {
+        offset: [
+            make_listing(
+                listing_id=f"l{offset}",
+                price=10.0,
+                images=[f"https://example.com/{offset}.jpg"],
+            )
+        ]
+        for offset in range(5)
+    }
+    adapter = FakeAdapter(pages=pages)
+    pipeline, _, _, db = make_pipeline(
+        tmp_path, {"ebay": adapter}, vision_response=BUY_RESULT
+    )
+    config = Config(db)
+    config.set("vision_analysis_budget_per_run", 100)  # unreachable in 2 pages
+    config.set("max_fetch_pages_per_source", 2)
+
+    summary = pipeline.run()
+
+    assert adapter.fetch_offsets == [0, 1]  # stopped at the cap, not exhaustion
+    assert summary.listings_seen == 2
 
 
 def test_run_persists_the_vision_models_notes_on_the_alert(tmp_path: Path) -> None:

@@ -77,3 +77,11 @@ def test_fetch_leaves_malformed_files_in_place_for_a_human_to_fix(
     FacebookAssistAdapter(tmp_path).fetch()
 
     assert (tmp_path / "2.json").exists()
+
+
+def test_fetch_with_a_nonzero_offset_returns_nothing(tmp_path: Path) -> None:
+    write_inbox_file(tmp_path, "1.json", json.dumps(VALID_ITEM))
+
+    listings = FacebookAssistAdapter(tmp_path).fetch(offset=50)
+
+    assert listings == []

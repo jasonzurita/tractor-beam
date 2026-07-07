@@ -57,7 +57,11 @@ class Tier2ApifyAdapter:
         self._source = source
         self._run_dataset = run_dataset
 
-    def fetch(self) -> list[Listing]:
+    def fetch(self, *, offset: int = 0) -> list[Listing]:
+        # No pagination exposed through the injected callable -- one run
+        # already returns the whole dataset.
+        if offset > 0:
+            return []
         items = self._run_dataset()
         fetched_at = datetime.now(UTC)
         return [

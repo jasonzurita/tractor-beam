@@ -226,6 +226,28 @@ def test_cache_hit_never_calls_the_client_again(tmp_path: Path) -> None:
     assert client.calls == 1
 
 
+def test_has_cached_grade_is_false_before_grading(tmp_path: Path) -> None:
+    vision, _ = make_vision(tmp_path)
+    assert not vision.has_cached_grade(["a", "b"])
+
+
+def test_has_cached_grade_is_true_after_grading(tmp_path: Path) -> None:
+    vision, _ = make_vision(tmp_path)
+    vision.grade(
+        images=["a", "b"],
+        title="t",
+        description="d",
+        graded_at="2026-07-06T00:00:00Z",
+    )
+    assert vision.has_cached_grade(["a", "b"])
+
+
+def test_has_cached_grade_never_calls_the_client(tmp_path: Path) -> None:
+    vision, client = make_vision(tmp_path)
+    vision.has_cached_grade(["a", "b"])
+    assert client.calls == 0
+
+
 def test_empty_items_never_crash_the_derived_properties(tmp_path: Path) -> None:
     empty = json.dumps({"items": [], "photo_quality": "clear", "notes": ""})
     vision, _ = make_vision(tmp_path, response=empty)

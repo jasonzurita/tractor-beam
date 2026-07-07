@@ -43,3 +43,15 @@ def test_fetch_normalizes_every_item_from_the_dataset() -> None:
 
     assert len(listings) == 2
     assert all(listing.source == "mercari" for listing in listings)
+
+
+def test_fetch_with_a_nonzero_offset_does_not_rerun_the_dataset() -> None:
+    calls = []
+    adapter = Tier2ApifyAdapter(
+        source="mercari", run_dataset=lambda: (calls.append(1), FIXTURE)[1]
+    )
+
+    listings = adapter.fetch(offset=10)
+
+    assert listings == []
+    assert calls == []
