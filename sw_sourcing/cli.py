@@ -212,7 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Logged: {path}")
         return 0
 
-    db = Database(Path(os.environ.get(_DB_PATH_ENV, _DEFAULT_DB_PATH)))
+    db_path = os.environ.get(_DB_PATH_ENV, _DEFAULT_DB_PATH)
+    db = Database(Path(db_path))
 
     if args.command == "config":
         config = Config(db)
@@ -245,6 +246,9 @@ def main(argv: list[str] | None = None) -> int:
             bug_reports_dir=bug_reports_dir,
             generated_at=datetime.now(UTC).isoformat(),
             recent_limit=_DASHBOARD_RECENT_LIMIT,
+            db_path=db_path,
+            log_path=os.environ.get(_LOG_PATH_ENV, _DEFAULT_LOG_PATH),
+            lock_path=os.environ.get(_LOCK_PATH_ENV, _DEFAULT_LOCK_PATH),
         )
         out_path = Path(args.out)
         out_path.write_text(render_dashboard_html(data))

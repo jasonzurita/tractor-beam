@@ -11,9 +11,11 @@ regenerate-on-demand snapshot, not a server).
 from __future__ import annotations
 
 import html
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from sw_sourcing import lock
 from sw_sourcing.storage.db import AlertRecord, Database, RunRecord, RunTotals
 
 _OUTCOME_EMOJI: dict[str, str] = {
@@ -41,6 +43,25 @@ class DashboardData:
     recent_runs: list[RunRecord]
     recent_alerts: list[AlertRecord]
     bug_reports: list[BugReportEntry]
+    scan_running: bool
+    db_path: str
+    log_path: str
+    lock_path: str
+    bug_reports_dir: str
+    cwd: str
+
+
+def _is_scan_running(lock_path: Path | str) -> bool:
+    """True if another process currently holds the scan lock.
+
+    Uses the same non-blocking flock as `lock.py` itself: if we can
+    acquire it, nothing else has it (and we immediately release); if we
+    can't, a scan is running right now. There's no separate "stale lock"
+    state to detect -- flock releases automatically when the holding
+    process exits or is killed.
+    """
+    with lock.acquire(lock_path) as acquired:
+        return not acquired
 
 
 def collect_bug_reports(
@@ -71,6 +92,9 @@ def build_dashboard_data(
     *,
     bug_reports_dir: Path | str,
     generated_at: str,
+    db_path: str = "sw_sourcing.db",
+    log_path: str = "sw_sourcing.log",
+    lock_path: str = "sw_sourcing.scan.lock",
     recent_limit: int = 20,
 ) -> DashboardData:
     return DashboardData(
@@ -81,6 +105,12 @@ def build_dashboard_data(
         recent_runs=db.get_recent_runs(limit=recent_limit),
         recent_alerts=db.get_recent_alerts(limit=recent_limit),
         bug_reports=collect_bug_reports(bug_reports_dir, limit=recent_limit),
+        scan_running=_is_scan_running(lock_path),
+        db_path=db_path,
+        log_path=log_path,
+        lock_path=lock_path,
+        bug_reports_dir=str(bug_reports_dir),
+        cwd=os.getcwd(),
     )
 
 
@@ -173,6 +203,44 @@ def _render_bug_reports(reports: list[BugReportEntry]) -> str:
     return "<ul class='bug-reports'>" + "".join(rows) + "</ul>"
 
 
+def _render_runbook(data: DashboardData) -> str:
+    db_path = html.escape(data.db_path)
+    log_path = html.escape(data.log_path)
+    lock_path = html.escape(data.lock_path)
+    bug_reports_dir = html.escape(data.bug_reports_dir)
+    cwd = html.escape(data.cwd)
+    return f"""
+<h3>Is it running right now?</h3>
+<p>The status tile above reflects the scan lock as of when this page was
+generated. To check live:</p>
+<pre>ps aux | grep "sw_sourcing.cli scan"
+lsof {lock_path}   # shows the PID holding the lock, if any</pre>
+
+<h3>Something looks stuck or needs a restart</h3>
+<p>There's no long-running service here to restart -- <code>scan</code>,
+<code>send-report</code>, and <code>dashboard</code> are all one-shot
+commands fired by cron. A wedged scan is safe to kill directly: the lock
+is a kernel flock tied to the process, so killing it frees the lock
+immediately and there's nothing to clean up by hand.</p>
+<pre>pkill -f "sw_sourcing.cli scan"</pre>
+<p>Then see what happened:</p>
+<pre>tail -100 {log_path}
+ls {bug_reports_dir}</pre>
+
+<h3>Start scan + email reports on a schedule</h3>
+<pre>crontab -e
+# add lines like (cadences are independent -- edit either without the other):
+*/30 * * * * cd {cwd} &amp;&amp; .venv/bin/python -m sw_sourcing.cli scan &gt;&gt; /dev/null 2&gt;&amp;1
+0 9 * * *    cd {cwd} &amp;&amp; .venv/bin/python -m sw_sourcing.cli send-report &gt;&gt; /dev/null 2&gt;&amp;1
+*/10 * * * * cd {cwd} &amp;&amp; .venv/bin/python -m sw_sourcing.cli dashboard &gt;&gt; /dev/null 2&gt;&amp;1</pre>
+<p>Check what's currently scheduled: <code>crontab -l</code>. On macOS,
+cron needs Full Disk Access (System Settings &rarr; Privacy &amp;
+Security) or these entries silently no-op.</p>
+<p class="paths">DB: <code>{db_path}</code> &middot; Log:
+<code>{log_path}</code> &middot; Lock: <code>{lock_path}</code></p>
+"""
+
+
 _STYLE = """
 body { font-family: -apple-system, sans-serif; background: #0f1115; color: #e6e6e6;
        margin: 0; padding: 2rem; }
@@ -200,10 +268,22 @@ ul { list-style: none; padding: 0; }
 li { padding: 0.4rem 0; border-bottom: 1px solid #2a2d36; }
 a { color: #6fb3ff; text-decoration: none; }
 .all-clear { color: #4caf50; }
+.status-running { color: #ffb74d; }
+.status-idle { color: #4caf50; }
+footer.runbook { color: #ccc; }
+footer.runbook h3 { margin-bottom: 0.3rem; }
+footer.runbook pre { background: #1a1d24; padding: 0.75rem 1rem; border-radius: 6px;
+       overflow-x: auto; }
+footer.runbook code { background: #1a1d24; padding: 0.1rem 0.3rem; border-radius: 3px; }
+footer.runbook .paths { color: #888; font-size: 0.85rem; }
 """
 
 
 def render_dashboard_html(data: DashboardData) -> str:
+    if data.scan_running:
+        status_html = '<span class="status-running">🔄 Running</span>'
+    else:
+        status_html = '<span class="status-idle">🟢 Idle</span>'
     tiles = "".join(
         [
             _stat_tile("Scans run", data.totals.total_runs),
@@ -223,7 +303,8 @@ def render_dashboard_html(data: DashboardData) -> str:
 <body>
 <h1>🛰️ Sourcing Engine Dashboard</h1>
 <p class="generated-at">Generated {html.escape(data.generated_at)} · re-run
-<code>python -m sw_sourcing.cli dashboard</code> to refresh</p>
+<code>python -m sw_sourcing.cli dashboard</code> to refresh · Scan status:
+{status_html}</p>
 <div class="tiles">{tiles}</div>
 <section>
 <h2>Outcomes (all time)</h2>
@@ -241,6 +322,10 @@ def render_dashboard_html(data: DashboardData) -> str:
 <h2>Recent alerts</h2>
 {_render_recent_alerts(data.recent_alerts)}
 </section>
+<footer class="runbook">
+<h2>Runbook</h2>
+{_render_runbook(data)}
+</footer>
 </body>
 </html>
 """

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from sw_sourcing import lock
 from sw_sourcing.dashboard import (
     BugReportEntry,
     DashboardData,
@@ -25,6 +26,7 @@ def make_alert(**overrides: object) -> AlertRecord:
         "returns_accepted": True,
         "suggested_offer": None,
         "vision_notes": None,
+        "cost_per_weapon": None,
         "price": 45.0,
         "alerted_at": "2026-07-07T00:00:00Z",
         "reported_at": None,
@@ -55,6 +57,12 @@ def make_dashboard_data(**overrides: object) -> DashboardData:
         "recent_runs": [make_run()],
         "recent_alerts": [make_alert()],
         "bug_reports": [],
+        "scan_running": False,
+        "db_path": "sw_sourcing.db",
+        "log_path": "sw_sourcing.log",
+        "lock_path": "sw_sourcing.scan.lock",
+        "bug_reports_dir": "bug_reports",
+        "cwd": "/path/to/tractor-beam",
     }
     defaults.update(overrides)
     return DashboardData(**defaults)  # type: ignore[arg-type]
@@ -198,6 +206,7 @@ def test_build_dashboard_data_aggregates_from_db(tmp_path: Path) -> None:
         returns_accepted=True,
         suggested_offer=None,
         vision_notes=None,
+        cost_per_weapon=None,
         price=45.0,
         alerted_at="2026-07-07T00:00:00Z",
     )
@@ -206,7 +215,12 @@ def test_build_dashboard_data_aggregates_from_db(tmp_path: Path) -> None:
     (reports_dir / "20260707T000000-abcd1234-issue.md").write_text("# Something odd\n")
 
     data = build_dashboard_data(
-        db, bug_reports_dir=reports_dir, generated_at="2026-07-07T12:00:00Z"
+        db,
+        bug_reports_dir=reports_dir,
+        generated_at="2026-07-07T12:00:00Z",
+        db_path=str(tmp_path / "test.db"),
+        log_path=str(tmp_path / "test.log"),
+        lock_path=str(tmp_path / "test.lock"),
     )
 
     assert data.generated_at == "2026-07-07T12:00:00Z"
@@ -217,3 +231,70 @@ def test_build_dashboard_data_aggregates_from_db(tmp_path: Path) -> None:
     assert len(data.recent_alerts) == 1
     assert len(data.bug_reports) == 1
     assert data.bug_reports[0].title == "Something odd"
+
+
+def test_render_shows_idle_status_when_scan_is_not_running() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data(scan_running=False))
+    assert "idle" in html_doc.lower()
+
+
+def test_render_shows_running_status_when_scan_is_running() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data(scan_running=True))
+    assert "running" in html_doc.lower()
+
+
+def test_render_includes_runbook_commands() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "crontab" in html_doc.lower()
+    assert "pkill" in html_doc.lower()
+
+
+def test_render_runbook_references_configured_paths() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(
+            db_path="/custom/sw.db",
+            log_path="/custom/sw.log",
+            lock_path="/custom/sw.lock",
+            bug_reports_dir="/custom/bug_reports",
+            cwd="/custom/project",
+        )
+    )
+    assert "/custom/sw.log" in html_doc
+    assert "/custom/sw.lock" in html_doc
+    assert "/custom/bug_reports" in html_doc
+    assert "/custom/project" in html_doc
+
+
+def test_build_dashboard_data_reports_idle_when_lock_is_free(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+
+    data = build_dashboard_data(
+        db,
+        bug_reports_dir=tmp_path / "bug_reports",
+        generated_at="2026-07-07T12:00:00Z",
+        db_path=str(tmp_path / "test.db"),
+        log_path=str(tmp_path / "test.log"),
+        lock_path=str(tmp_path / "test.lock"),
+    )
+
+    assert data.scan_running is False
+
+
+def test_build_dashboard_data_reports_running_when_lock_is_held(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "test.db")
+    lock_path = tmp_path / "test.lock"
+
+    with lock.acquire(lock_path) as acquired:
+        assert acquired
+        data = build_dashboard_data(
+            db,
+            bug_reports_dir=tmp_path / "bug_reports",
+            generated_at="2026-07-07T12:00:00Z",
+            db_path=str(tmp_path / "test.db"),
+            log_path=str(tmp_path / "test.log"),
+            lock_path=str(lock_path),
+        )
+
+    assert data.scan_running is True
