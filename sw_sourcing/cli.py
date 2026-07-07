@@ -6,7 +6,10 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
@@ -15,6 +18,7 @@ from sw_sourcing.adapters.base import Adapter
 from sw_sourcing.adapters.ebay import EbayAdapter, get_ebay_access_token
 from sw_sourcing.adapters.facebook_assist import FacebookAssistAdapter
 from sw_sourcing.alerts.discord import DiscordAlerts
+from sw_sourcing.alerts.email import EmailSender, format_report
 from sw_sourcing.core.dedupe import Dedupe
 from sw_sourcing.core.vision import ClaudeCliVisionClient, Vision
 from sw_sourcing.diagnostics import DEFAULT_REPORTS_DIR, write_report
@@ -29,6 +33,8 @@ _DEFAULT_DB_PATH = "sw_sourcing.db"
 _FACEBOOK_INBOX_ENV = "FACEBOOK_INBOX_DIR"
 _DEFAULT_FACEBOOK_INBOX = "facebook_inbox"
 _BUG_REPORTS_DIR_ENV = "SW_SOURCING_BUG_REPORTS_DIR"
+_DEFAULT_SMTP_HOST = "smtp.gmail.com"
+_DEFAULT_SMTP_PORT = 465
 
 
 def build_adapters(
@@ -73,6 +79,40 @@ def build_adapters(
     return {name: adapter for name, adapter in registry.items() if name in enabled}
 
 
+def send_report(
+    db: Database,
+    *,
+    to_addr: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_username: str,
+    smtp_password: str,
+    smtp_factory: Callable[[], Any] | None = None,
+) -> int:
+    """Email everything not yet reported; a no-op (returns 0) if nothing's
+    new. Cadence is deliberately not this function's concern -- call it as
+    often as you like (e.g. from cron); it only ever sends what's new since
+    the last successful send.
+    """
+    unreported = db.get_unreported_alerts()
+    if not unreported:
+        return 0
+
+    subject, html = format_report(unreported)
+    EmailSender(
+        host=smtp_host,
+        port=smtp_port,
+        username=smtp_username,
+        password=smtp_password,
+        smtp_factory=smtp_factory,
+    ).send(to_addr=to_addr, subject=subject, html_body=html)
+
+    db.mark_alerts_reported(
+        [alert.id for alert in unreported], reported_at=datetime.now(UTC).isoformat()
+    )
+    return len(unreported)
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
@@ -82,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
 
     scan_parser = subparsers.add_parser("scan", help="Run one scheduled scan")
     scan_parser.add_argument("--source", help="Only run this one source's adapter")
+
+    subparsers.add_parser(
+        "send-report", help="Email the digest of alerts not yet reported"
+    )
 
     report_parser = subparsers.add_parser(
         "report-bug", help="Manually log something odd for later review"
@@ -103,7 +147,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     db = Database(Path(os.environ.get(_DB_PATH_ENV, _DEFAULT_DB_PATH)))
+
+    if args.command == "send-report":
+        try:
+            count = send_report(
+                db,
+                to_addr=os.environ["REPORT_TO_EMAIL"],
+                smtp_host=os.environ.get("SMTP_HOST", _DEFAULT_SMTP_HOST),
+                smtp_port=int(os.environ.get("SMTP_PORT", _DEFAULT_SMTP_PORT)),
+                smtp_username=os.environ["SMTP_USERNAME"],
+                smtp_password=os.environ["SMTP_PASSWORD"],
+            )
+        except Exception as exc:
+            logger.exception("Unhandled error sending report; see bug_reports/")
+            write_report(
+                summary="Unhandled error sending report",
+                context={},
+                exception=exc,
+                reports_dir=bug_reports_dir,
+            )
+            return 1
+        logger.info("Report: %s alert(s) sent", count)
+        return 0
+
     config = Config(db)
+    discord_webhook = os.environ.get("DISCORD_WEBHOOK_URL")
 
     try:
         adapters = build_adapters(config, bug_reports_dir=bug_reports_dir)
@@ -122,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             vision=Vision(ClaudeCliVisionClient(), db),
             config=config,
             db=db,
-            alerts=DiscordAlerts(os.environ["DISCORD_WEBHOOK_URL"]),
+            alerts=DiscordAlerts(discord_webhook) if discord_webhook else None,
             bug_reports_dir=bug_reports_dir,
         )
         summary = pipeline.run()

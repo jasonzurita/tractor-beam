@@ -3,9 +3,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from sw_sourcing.cli import build_adapters, main
+from sw_sourcing.cli import build_adapters, main, send_report
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
+from tests.unit.factories import FakeSmtp
 
 
 def make_config(tmp_path: Path) -> Config:
@@ -106,3 +107,60 @@ def test_report_bug_command_writes_a_report_and_exits_cleanly(
     reports = list(reports_dir.glob("*.md"))
     assert len(reports) == 1
     assert "cost per figure looked wrong" in reports[0].read_text()
+
+
+def make_db(tmp_path: Path) -> Database:
+    return Database(tmp_path / "test.db")
+
+
+def test_send_report_emails_unreported_alerts_and_marks_them_reported(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    db.record_alert(
+        source="ebay",
+        listing_id="1",
+        title="Vintage Kenner lot",
+        url="https://example.com/1",
+        image_url=None,
+        outcome="buy",
+        cost_per_figure=4.5,
+        target_grade_count=10,
+        max_repro_risk="low",
+        returns_accepted=True,
+        suggested_offer=None,
+        alerted_at="2026-07-07T00:00:00Z",
+    )
+    smtp = FakeSmtp()
+
+    count = send_report(
+        db,
+        to_addr="jasonzurita@me.com",
+        smtp_host="smtp.gmail.com",
+        smtp_port=465,
+        smtp_username="jzuri1@gmail.com",
+        smtp_password="app-password",
+        smtp_factory=lambda: smtp,
+    )
+
+    assert count == 1
+    assert len(smtp.sent_messages) == 1
+    assert db.get_unreported_alerts() == []
+
+
+def test_send_report_is_a_noop_when_nothing_is_unreported(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    smtp = FakeSmtp()
+
+    count = send_report(
+        db,
+        to_addr="jasonzurita@me.com",
+        smtp_host="smtp.gmail.com",
+        smtp_port=465,
+        smtp_username="jzuri1@gmail.com",
+        smtp_password="app-password",
+        smtp_factory=lambda: smtp,
+    )
+
+    assert count == 0
+    assert smtp.sent_messages == []
