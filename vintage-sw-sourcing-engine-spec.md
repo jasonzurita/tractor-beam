@@ -15,7 +15,7 @@ Surface, on a schedule, the listings worth your attention across multiple market
 
 The output is a short, high-signal alert feed you triage from your phone.
 
-**Buying profile:** mid-to-high grade figures at **~$5 per good figure**. **Weapons and accessories are wanted** (target price configurable, TBD). **Authenticity is mandatory — 100% authentic vintage Kenner, no reproductions, no restored/replacement parts.** Authenticity is a hard gate that **overrides price** (see §8).
+**Buying profile:** mid-to-high grade figures at **~$5 per good figure**. **Weapons and accessories are wanted** (target price configurable, placeholder ~$8/authentic weapon until real comps are set). **Authenticity is mandatory — 100% authentic vintage Kenner, no reproductions, no restored/replacement parts.** Authenticity is a hard gate that **overrides price** (see §8) — a possible rare/valuable variant (see §7) is never a shortcut around it.
 
 ---
 
@@ -116,6 +116,8 @@ One structured call per listing that clears the pre-filter. Send **all photos in
 
 **Repro risk:** `low` / `elevated` / `high` per item, **biased to caution** — any uncertainty about a weapon or accessory is at least `elevated`. This is a **risk signal, not a verdict** (see §8).
 
+**Rarity:** each weapon/accessory is also checked against known rare/valuable vintage Kenner variants (e.g. a long-saber lightsaber, a first-shot/prototype-style piece). A match sets `rare_candidate: true` with `rarity_notes` explaining which variant and why. Rarity is a **caution multiplier, never a discount** — rare, valuable pieces are exactly what counterfeiters target most, so a rare candidate is never lower-scrutiny than a common one.
+
 **Output (strict JSON):**
 
 ```json
@@ -126,7 +128,9 @@ One structured call per listing that clears the pre-filter. Send **all photos in
     {"id": 2, "type": "figure",    "grade": "damaged","issues": ["missing arm"],    "repro_risk": "low",      "confidence": 0.8},
     {"id": 3, "type": "weapon",    "grade": "mid",  "issues": [],                   "repro_risk": "elevated", "confidence": 0.5,
      "repro_notes": "plastic looks glossy/new; expected wear absent"},
-    {"id": 4, "type": "accessory", "grade": "uncertain","issues": [],               "repro_risk": "high",     "confidence": 0.3}
+    {"id": 4, "type": "accessory", "grade": "uncertain","issues": [],               "repro_risk": "high",     "confidence": 0.3},
+    {"id": 5, "type": "weapon",    "grade": "high", "issues": [],                   "repro_risk": "low",      "confidence": 0.7,
+     "rare_candidate": true, "rarity_notes": "matches the long-saber variant"}
   ],
   "target_grade_count": 1,             // figures: mid+ grade, undamaged, repro_risk low
   "authentic_weapon_count": 0,         // weapons/accessories with repro_risk low
@@ -139,7 +143,7 @@ One structured call per listing that clears the pre-filter. Send **all photos in
 
 - **`target_grade_count` counts only figures that are mid+ grade, undamaged, AND `repro_risk: low`.**
 - **Conservative counting** — ambiguous piles return a range + low confidence.
-- **`uncertain` grade or non-low repro risk → routed, never silently passed.**
+- **`uncertain` grade, non-low repro risk, or `rare_candidate: true` → routed, never silently passed.**
 - **`target_grade_count` and `authentic_weapon_count` in the model's JSON are advisory only.** The pipeline deterministically recomputes both in code from the itemized `items` list before either value touches cost math or the decision engine — a model arithmetic slip must never silently drive a buy.
 
 **Cost control:** only call vision after the pre-filter passes; cache by a hash of the listing's **full image set** (all photos hashed together, since grading is one request per listing, not per photo); cheap model first, escalate low-confidence cases.
@@ -156,25 +160,33 @@ One structured call per listing that clears the pre-filter. Send **all photos in
 
 1. **Text screen (cheapest, first).** Auto-reject/route listings whose text discloses `repro`, `reproduction`, `replacement`, `restored`, `custom`, `aftermarket`, `not original`, etc. Configurable blocklist.
 2. **Vision repro-risk flag** (see §7) — per-item risk score, biased to caution.
-3. **Seller + return signals.** High feedback, specialization, and especially `returns_accepted: true` make a wrong call reversible.
-4. **Mandatory in-hand authentication.** Every item is authenticated by you against references **before it goes on the show.** This is the guarantee.
+3. **Rarity as extra scrutiny, never a shortcut.** A `rare_candidate` item always routes to manual review regardless of its own repro-risk score — a possible rare/valuable variant is exactly what a counterfeiter would target, so it gets *more* eyes, never fewer.
+4. **Seller + return signals.** High feedback, specialization, and especially `returns_accepted: true` make a wrong call reversible.
+5. **Mandatory in-hand authentication.** Every item is authenticated by you against references **before it goes on the show.** This is the guarantee.
 
-**Decision impact:** repro risk above `low` → **manual review, never auto-buy.** The buy-now path requires all counted items at `repro_risk: low`; strongly prefer `returns_accepted: true` on anything containing weapons/accessories.
+**Decision impact:** repro risk above `low`, or any `rare_candidate` item, → **manual review, never auto-buy.** The buy-now path requires all counted items at `repro_risk: low` and no rare candidates; strongly prefer `returns_accepted: true` on anything containing weapons/accessories.
 
 ---
 
 ## 9. Decision engine — four outcomes
 
-Compute **cost per target-grade figure** = `(price + shipping) / target_grade_count`; authentic weapons/accessories add value. Then sort:
+**Figure lots** (`target_grade_count` > 0): authentic weapons/accessories credit toward the lot's effective cost —
+`effective_cost = max(0, price + shipping − authentic_weapon_count × target_per_weapon)`,
+then **cost per target-grade figure** = `effective_cost / target_grade_count`. A good weapon makes the rest of the lot cheaper, the way a buyer would actually value a mixed lot.
+
+**Weapon-only lots** (zero qualifying figures but `authentic_weapon_count` > 0): evaluated standalone as
+**cost per weapon** = `(price + shipping) / authentic_weapon_count` against `target_per_weapon` — previously this case was an automatic skip regardless of how many good weapons were in it.
+
+Then sort:
 
 | Outcome | Condition |
 |---|---|
-| **Buy now** | cost/figure ≤ `target_per_figure`, all counted items `repro_risk: low`, (prefer returnable) |
-| **Negotiate** | over target but within band, offers accepted, low repro risk |
-| **Manual review** | any `elevated`/`high` repro risk, or `uncertain` grade — authenticity decision needs eyes |
-| **Skip** | too far over target, too few good figures, disclosed repro, or fails the gate |
+| **Buy now** | cost/figure (or cost/weapon for a weapon-only lot) ≤ target, all counted items `repro_risk: low`, no rare candidates, (prefer returnable) |
+| **Negotiate** | over target but within band, offers accepted, low repro risk, no rare candidates |
+| **Manual review** | any `elevated`/`high` repro risk, any `rare_candidate` item, or `uncertain` grade — authenticity decision needs eyes |
+| **Skip** | too far over target, too few good figures/weapons, disclosed repro, or fails the gate |
 
-**Negotiate band** — config value (~30–40% over target). Offer slightly below target; never surface a lot that loses money after fees at its best realistic price. Negotiate only on offer-accepting, haggle-friendly sources — never live auctions.
+**Negotiate band** — config value (~30–40% over target). Offer slightly below target; never surface a lot that loses money after fees at its best realistic price. Negotiate only on offer-accepting, haggle-friendly sources — never live auctions. A negotiate offer on a figure lot adds the full weapon credit on top of the (slightly undercut) figure-only offer, since `target_per_weapon` is already treated as a fair price rather than a haggling ceiling.
 
 ---
 
