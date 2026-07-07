@@ -156,6 +156,47 @@ def test_run_never_reprocesses_a_listing_already_seen(tmp_path: Path) -> None:
     assert vision_client.calls == 1  # never re-billed on the reseen listing
 
 
+def test_run_realerts_when_a_previously_skipped_listing_drops_in_price(
+    tmp_path: Path,
+) -> None:
+    single_high_grade_item = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "figure",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    listing = make_listing(
+        listing_id="price-drop-1",
+        price=100.0,
+        shipping=0.0,
+        offers_accepted=False,
+        buying_option="fixed_price",
+    )
+    adapter = FakeAdapter([listing])
+    pipeline, vision_client, _, _ = make_pipeline(
+        tmp_path, {"ebay": adapter}, vision_response=single_high_grade_item
+    )
+
+    first = pipeline.run()
+    assert first.alerts_sent == 0  # $100 for one target-grade figure: too expensive
+
+    adapter.set_listings([listing.model_copy(update={"price": 4.0})])
+    second = pipeline.run()
+
+    assert second.alerts_sent == 1  # same listing, price dropped into buy range
+    assert vision_client.calls == 1  # same images -> vision_cache hit, no re-billing
+
+
 def test_run_persists_the_vision_models_notes_on_the_alert(tmp_path: Path) -> None:
     result_with_notes = json.dumps(
         {
