@@ -47,6 +47,8 @@ class VisionItem(BaseModel):
     repro_risk: ReproRisk
     confidence: float
     repro_notes: str | None = None
+    rare_candidate: bool = False
+    rarity_notes: str | None = None
 
 
 class VisionResult(BaseModel):
@@ -88,6 +90,27 @@ class VisionResult(BaseModel):
     @property
     def has_uncertain_grade(self) -> bool:
         return any(item.grade == "uncertain" for item in self.items)
+
+    @property
+    def has_rare_candidate(self) -> bool:
+        """True if any item might be a known rare/valuable variant.
+
+        This is a signal for extra caution, never a pricing shortcut --
+        see core/authenticity.py, which routes any rare candidate to
+        manual review regardless of its own repro_risk value.
+        """
+        return any(item.rare_candidate for item in self.items)
+
+    @property
+    def rare_items_summary(self) -> str:
+        """Human-readable notes for every rare-flagged item, for surfacing
+        in an alert so a reviewer knows why it's flagged and can judge
+        whether the price is worth acting on."""
+        return "; ".join(
+            f"{item.type} (id {item.id}): {item.rarity_notes}"
+            for item in self.items
+            if item.rare_candidate and item.rarity_notes
+        )
 
     @property
     def min_confidence(self) -> float:
@@ -155,13 +178,24 @@ uncertainty about a weapon or accessory's authenticity is at least \
 "elevated".
 - Ambiguous piles: be conservative and lower confidence rather than guess.
 
+For each weapon or accessory, also consider whether it might be a known \
+rare or especially valuable vintage Kenner variant (e.g. an unusual \
+long-saber lightsaber, a first-shot/prototype-style weapon, or another \
+variant collectors specifically seek out). If so, set "rare_candidate": \
+true and explain which variant you suspect and why in "rarity_notes". \
+Rare and valuable pieces are the ones counterfeiters target most, so \
+flagging something as a possible rare variant should make you MORE \
+cautious about authenticity, never less -- do not lower repro_risk just \
+because a piece looks exciting or valuable.
+
 Return ONLY strict JSON (no markdown fences, no commentary) matching this \
 exact shape:
 {{
   "items": [
     {{"id": 1, "type": "figure|weapon|accessory", "grade": "...", \
 "issues": ["..."], "repro_risk": "...", "confidence": 0.0, \
-"repro_notes": "optional string"}}
+"repro_notes": "optional string", "rare_candidate": false, \
+"rarity_notes": "optional string"}}
   ],
   "photo_quality": "clear|unclear",
   "notes": "short free-text notes"

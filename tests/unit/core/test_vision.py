@@ -141,6 +141,74 @@ def test_has_uncertain_grade_is_false_when_none_are_uncertain(tmp_path: Path) ->
     assert not result.has_uncertain_grade
 
 
+def test_has_rare_candidate_is_false_when_none_are_flagged(tmp_path: Path) -> None:
+    vision, _ = make_vision(tmp_path)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+    assert not result.has_rare_candidate
+
+
+def test_has_rare_candidate_is_true_when_an_item_is_flagged(tmp_path: Path) -> None:
+    rare_result = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "weapon",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                    "rare_candidate": True,
+                    "rarity_notes": "Matches the long-saber variant.",
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    vision, _ = make_vision(tmp_path, response=rare_result)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+    assert result.has_rare_candidate
+
+
+def test_rare_items_summary_is_empty_when_none_are_flagged(tmp_path: Path) -> None:
+    vision, _ = make_vision(tmp_path)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+    assert result.rare_items_summary == ""
+
+
+def test_rare_items_summary_includes_the_rarity_notes(tmp_path: Path) -> None:
+    rare_result = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "weapon",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                    "rare_candidate": True,
+                    "rarity_notes": "Matches the long-saber variant.",
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    vision, _ = make_vision(tmp_path, response=rare_result)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+    assert "Matches the long-saber variant." in result.rare_items_summary
+
+
 def test_cache_hit_never_calls_the_client_again(tmp_path: Path) -> None:
     vision, client = make_vision(tmp_path)
     vision.grade(
@@ -169,6 +237,8 @@ def test_empty_items_never_crash_the_derived_properties(tmp_path: Path) -> None:
     assert result.max_repro_risk == "low"
     assert result.min_confidence == 0.0
     assert not result.has_uncertain_grade
+    assert not result.has_rare_candidate
+    assert result.rare_items_summary == ""
 
 
 def test_hash_image_set_is_order_independent() -> None:
@@ -189,6 +259,12 @@ def test_build_prompt_includes_title_description_and_each_image_path() -> None:
     assert "12 loose figures" in prompt
     assert "/tmp/a.jpg" in prompt
     assert "/tmp/b.jpg" in prompt
+
+
+def test_build_prompt_asks_about_rare_variants_and_extra_repro_caution() -> None:
+    prompt = build_prompt(title="t", description="d", image_paths=[])
+    assert "rare" in prompt.lower()
+    assert "counterfeit" in prompt.lower() or "reproduc" in prompt.lower()
 
 
 def test_extract_json_passes_through_plain_json() -> None:
