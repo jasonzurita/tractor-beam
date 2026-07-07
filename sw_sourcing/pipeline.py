@@ -236,6 +236,7 @@ class Pipeline:
         authenticity_clear = clear_repro_risk(
             max_repro_risk=vision_result.max_repro_risk,
             has_uncertain_grade=vision_result.has_uncertain_grade,
+            has_rare_candidate=vision_result.has_rare_candidate,
             max_repro_risk_for_autobuy=self._config.get("max_repro_risk_for_autobuy"),
         )
         damaged_or_low_count = sum(

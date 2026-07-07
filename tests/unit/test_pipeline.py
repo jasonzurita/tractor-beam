@@ -302,6 +302,55 @@ def test_run_persists_the_vision_models_notes_on_the_alert(tmp_path: Path) -> No
     )
 
 
+def test_run_routes_a_rare_candidate_to_review_even_at_low_repro_risk(
+    tmp_path: Path,
+) -> None:
+    rare_but_low_risk = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "figure",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                },
+                {
+                    "id": 2,
+                    "type": "weapon",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                    "rare_candidate": True,
+                    "rarity_notes": "Matches the long-saber variant.",
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    # Priced to clear the figure economics easily -- this proves the review
+    # routing comes from the rarity flag itself, not from the price/cost math.
+    listing = make_listing(listing_id="rare-1", price=5.0, shipping=0.0)
+    pipeline, _, discord_client, db = make_pipeline(
+        tmp_path,
+        {"ebay": FakeAdapter([listing])},
+        vision_response=rare_but_low_risk,
+    )
+
+    summary = pipeline.run()
+
+    assert summary.alerts_sent == 1
+    review_payloads = [
+        payload for _, payload in discord_client.calls if "REVIEW" in payload["content"]
+    ]
+    assert len(review_payloads) == 1
+    unreported = db.get_unreported_alerts()
+    assert unreported[0].outcome == "review"
+
+
 def test_run_isolates_a_failing_adapter_and_still_processes_others(
     tmp_path: Path,
 ) -> None:

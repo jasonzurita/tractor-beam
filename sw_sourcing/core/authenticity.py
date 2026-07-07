@@ -27,14 +27,18 @@ def clear_repro_risk(
     *,
     max_repro_risk: ReproRisk,
     has_uncertain_grade: bool,
+    has_rare_candidate: bool,
     max_repro_risk_for_autobuy: ReproRisk,
 ) -> bool:
     """True if the listing may proceed to price-based decisioning.
 
     False routes to manual review — never a skip, since nothing here was
-    disclosed as reproduction; it's only a vision-flagged risk or an
-    unresolvable grade.
+    disclosed as reproduction; it's only a vision-flagged risk, an
+    unresolvable grade, or a possible rare/valuable variant. Rare pieces
+    are the ones counterfeiters target most, so a rare_candidate flag
+    always routes to review regardless of its own repro_risk score --
+    rarity is never a shortcut around authenticity.
     """
-    if has_uncertain_grade:
+    if has_uncertain_grade or has_rare_candidate:
         return False
     return _RISK_ORDER[max_repro_risk] <= _RISK_ORDER[max_repro_risk_for_autobuy]
