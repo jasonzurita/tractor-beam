@@ -56,8 +56,9 @@ sw_sourcing/
     email.py           # primary channel: periodic digest, decoupled from scan cadence
   diagnostics.py       # automatic bug reporting (see below) -- not auto-fix
   lock.py              # non-blocking file lock, prevents overlapping scan runs
+  dashboard.py         # read-only HTML snapshot of runs/alerts/bug reports
   pipeline.py          # orchestrates one run (wires the pieces together)
-  cli.py               # cron entrypoint: scan / send-report / report-bug / config
+  cli.py               # cron entrypoint: scan / send-report / report-bug / config / dashboard
 tests/                 # mirrors the package tree
   unit/                # pure-logic tests, no network
   fixtures/            # recorded API/scraper/vision responses
@@ -78,6 +79,7 @@ bug_reports/           # gitignored; written by diagnostics.py, reviewed by hand
 | `alerts/*` | Formatting + sending | Decide what qualifies as an alert |
 | `diagnostics.py` | Writing bug reports (context + traceback + repro) for human review; cooldown-gates repeat reports for the same failure key so a persistently broken source/listing doesn't spam a fresh report every run | **Auto-fix or self-modify code.** This project deliberately has no autonomous self-healing -- errors are captured for periodic manual review with Claude Code, never acted on unattended |
 | `lock.py` | Non-blocking file lock so overlapping `scan` runs skip cleanly instead of racing on the SQLite file | Block/wait for the lock -- a stuck lock must never hang cron |
+| `dashboard.py` | Reading run/alert/bug-report history and rendering it to a static HTML snapshot for local viewing | Serve live/refresh itself -- it's regenerated on demand via `cli.py dashboard`, never a running process |
 | `pipeline.py` | Wiring + orchestration | Reimplement any of the above |
 
 ---
@@ -136,6 +138,10 @@ python -m sw_sourcing.cli report-bug "note"         # manually log something odd
 python -m sw_sourcing.cli config list               # print every config key + value
 python -m sw_sourcing.cli config get target_per_figure
 python -m sw_sourcing.cli config set target_per_figure 5.5
+python -m sw_sourcing.cli dashboard                 # regenerate dashboard.html (local observability snapshot)
+python -m sw_sourcing.cli dashboard --out /tmp/d.html  # write it somewhere else
+python -m sw_sourcing.cli --help                    # list all commands
+python -m sw_sourcing.cli <command> --help          # options for one command
 ```
 
 `scan` and `send-report` run on independent cron schedules -- changing either's
