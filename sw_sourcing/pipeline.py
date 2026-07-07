@@ -51,7 +51,7 @@ class Pipeline:
         vision: Vision,
         config: Config,
         db: Database,
-        alerts: DiscordAlerts,
+        alerts: DiscordAlerts | None = None,
         bug_reports_dir: Path | str = DEFAULT_REPORTS_DIR,
     ) -> None:
         self._adapters = adapters
@@ -110,15 +110,16 @@ class Pipeline:
             listings_seen=summary.listings_seen,
             alerts_sent=summary.alerts_sent,
         )
-        self._alerts.send(
-            format_heartbeat(
-                sources_ok=summary.sources_ok,
-                sources_failed=summary.sources_failed,
-                listings_seen=summary.listings_seen,
-                alerts_sent=summary.alerts_sent,
-                bug_reports_written=summary.bug_reports_written,
+        if self._alerts is not None:
+            self._alerts.send(
+                format_heartbeat(
+                    sources_ok=summary.sources_ok,
+                    sources_failed=summary.sources_failed,
+                    listings_seen=summary.listings_seen,
+                    alerts_sent=summary.alerts_sent,
+                    bug_reports_written=summary.bug_reports_written,
+                )
             )
-        )
         return summary
 
     def _process(self, listing: Listing, summary: RunSummary) -> None:
@@ -205,20 +206,24 @@ class Pipeline:
                 target_per_figure=self._config.get("target_per_figure"),
             )
 
-        self._alerts.send(
-            format_alert(
-                listing,
-                outcome,
-                cost_per_figure=cost_per_figure,
-                target_grade_count=target_grade_count,
-                suggested_offer=offer,
-                max_repro_risk=vision_result.max_repro_risk,
-                returns_accepted=listing.returns_accepted,
+        if self._alerts is not None:
+            self._alerts.send(
+                format_alert(
+                    listing,
+                    outcome,
+                    cost_per_figure=cost_per_figure,
+                    target_grade_count=target_grade_count,
+                    suggested_offer=offer,
+                    max_repro_risk=vision_result.max_repro_risk,
+                    returns_accepted=listing.returns_accepted,
+                )
             )
-        )
         self._db.record_alert(
             source=listing.source,
             listing_id=listing.listing_id,
+            title=listing.title,
+            url=str(listing.url),
+            image_url=str(listing.images[0]) if listing.images else None,
             outcome=outcome,
             cost_per_figure=cost_per_figure,
             target_grade_count=target_grade_count,

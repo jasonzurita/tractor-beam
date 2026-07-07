@@ -9,6 +9,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 SCHEMA = """
@@ -30,13 +31,17 @@ CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY,
     source TEXT NOT NULL,
     listing_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    image_url TEXT,
     outcome TEXT NOT NULL,
     cost_per_figure REAL,
     target_grade_count INTEGER,
     max_repro_risk TEXT,
     returns_accepted INTEGER,
     suggested_offer REAL,
-    alerted_at TEXT NOT NULL
+    alerted_at TEXT NOT NULL,
+    reported_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS config (
@@ -53,6 +58,50 @@ CREATE TABLE IF NOT EXISTS runs (
     alerts_sent INTEGER
 );
 """
+
+
+@dataclass(frozen=True)
+class AlertRecord:
+    id: int
+    source: str
+    listing_id: str
+    title: str
+    url: str
+    image_url: str | None
+    outcome: str
+    cost_per_figure: float | None
+    target_grade_count: int | None
+    max_repro_risk: str | None
+    returns_accepted: bool
+    suggested_offer: float | None
+    alerted_at: str
+    reported_at: str | None
+
+
+_ALERT_COLUMNS = (
+    "id, source, listing_id, title, url, image_url, outcome, cost_per_figure,"
+    " target_grade_count, max_repro_risk, returns_accepted, suggested_offer,"
+    " alerted_at, reported_at"
+)
+
+
+def _row_to_alert_record(row: tuple[object, ...]) -> AlertRecord:
+    return AlertRecord(
+        id=row[0],  # type: ignore[arg-type]
+        source=row[1],  # type: ignore[arg-type]
+        listing_id=row[2],  # type: ignore[arg-type]
+        title=row[3],  # type: ignore[arg-type]
+        url=row[4],  # type: ignore[arg-type]
+        image_url=row[5],  # type: ignore[arg-type]
+        outcome=row[6],  # type: ignore[arg-type]
+        cost_per_figure=row[7],  # type: ignore[arg-type]
+        target_grade_count=row[8],  # type: ignore[arg-type]
+        max_repro_risk=row[9],  # type: ignore[arg-type]
+        returns_accepted=bool(row[10]),
+        suggested_offer=row[11],  # type: ignore[arg-type]
+        alerted_at=row[12],  # type: ignore[arg-type]
+        reported_at=row[13],  # type: ignore[arg-type]
+    )
 
 
 class Database:
@@ -136,6 +185,9 @@ class Database:
         *,
         source: str,
         listing_id: str,
+        title: str,
+        url: str,
+        image_url: str | None,
         outcome: str,
         cost_per_figure: float | None,
         target_grade_count: int | None,
@@ -148,14 +200,17 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO alerts (
-                    source, listing_id, outcome, cost_per_figure,
-                    target_grade_count, max_repro_risk, returns_accepted,
-                    suggested_offer, alerted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source, listing_id, title, url, image_url, outcome,
+                    cost_per_figure, target_grade_count, max_repro_risk,
+                    returns_accepted, suggested_offer, alerted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
                     listing_id,
+                    title,
+                    url,
+                    image_url,
                     outcome,
                     cost_per_figure,
                     target_grade_count,
@@ -164,6 +219,24 @@ class Database:
                     suggested_offer,
                     alerted_at,
                 ),
+            )
+
+    def get_unreported_alerts(self) -> list[AlertRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {_ALERT_COLUMNS} FROM alerts WHERE reported_at IS NULL"
+                " ORDER BY alerted_at"
+            ).fetchall()
+        return [_row_to_alert_record(row) for row in rows]
+
+    def mark_alerts_reported(self, alert_ids: list[int], *, reported_at: str) -> None:
+        if not alert_ids:
+            return
+        placeholders = ", ".join("?" for _ in alert_ids)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE alerts SET reported_at = ? WHERE id IN ({placeholders})",
+                (reported_at, *alert_ids),
             )
 
     def record_run(

@@ -64,19 +64,65 @@ def test_config_missing_key_returns_none(tmp_path: Path) -> None:
     assert db.get_config("target_per_figure") is None
 
 
+def record_sample_alert(db: Database, **overrides: object) -> None:
+    defaults: dict[str, object] = {
+        "source": "ebay",
+        "listing_id": "1",
+        "title": "Vintage Kenner lot",
+        "url": "https://example.com/1",
+        "image_url": "https://example.com/1.jpg",
+        "outcome": "buy",
+        "cost_per_figure": 4.5,
+        "target_grade_count": 10,
+        "max_repro_risk": "low",
+        "returns_accepted": True,
+        "suggested_offer": None,
+        "alerted_at": "2026-07-06T00:00:00Z",
+    }
+    defaults.update(overrides)
+    db.record_alert(**defaults)  # type: ignore[arg-type]
+
+
 def test_record_alert_does_not_raise(tmp_path: Path) -> None:
     db = make_db(tmp_path)
-    db.record_alert(
-        source="ebay",
-        listing_id="1",
-        outcome="buy",
-        cost_per_figure=4.5,
-        target_grade_count=10,
-        max_repro_risk="low",
-        returns_accepted=True,
-        suggested_offer=None,
-        alerted_at="2026-07-06T00:00:00Z",
+    record_sample_alert(db)
+
+
+def test_unreported_alerts_returns_a_freshly_recorded_alert(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", title="Vintage Kenner lot")
+
+    unreported = db.get_unreported_alerts()
+
+    assert len(unreported) == 1
+    assert unreported[0].listing_id == "1"
+    assert unreported[0].title == "Vintage Kenner lot"
+    assert unreported[0].reported_at is None
+
+
+def test_marking_reported_removes_it_from_unreported(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1")
+
+    unreported = db.get_unreported_alerts()
+    db.mark_alerts_reported(
+        [alert.id for alert in unreported], reported_at="2026-07-07T12:00:00Z"
     )
+
+    assert db.get_unreported_alerts() == []
+
+
+def test_marking_reported_does_not_affect_other_alerts(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1")
+    record_sample_alert(db, listing_id="2")
+
+    first = db.get_unreported_alerts()[0]
+    db.mark_alerts_reported([first.id], reported_at="2026-07-07T12:00:00Z")
+
+    remaining = db.get_unreported_alerts()
+    assert len(remaining) == 1
+    assert remaining[0].listing_id == "2"
 
 
 def test_record_run_does_not_raise(tmp_path: Path) -> None:

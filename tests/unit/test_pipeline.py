@@ -66,6 +66,33 @@ def make_pipeline(
     return pipeline, vision_client, discord_client
 
 
+def test_run_works_without_discord_configured_and_still_persists_alerts(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "test.db")
+    config = Config(db)
+    dedupe = Dedupe(db)
+    vision = Vision(FakeVisionClient(BUY_RESULT), db)
+    listing = make_listing(listing_id="buy-1", price=10.0, shipping=0.0)
+    pipeline = Pipeline(
+        adapters={"ebay": FakeAdapter([listing])},
+        bug_reports_dir=tmp_path / "bug_reports",
+        dedupe=dedupe,
+        vision=vision,
+        config=config,
+        db=db,
+        alerts=None,
+    )
+
+    summary = pipeline.run()
+
+    assert summary.alerts_sent == 1
+    unreported = db.get_unreported_alerts()
+    assert len(unreported) == 1
+    assert unreported[0].title == listing.title
+    assert unreported[0].url == str(listing.url)
+
+
 def test_run_sends_a_buy_alert_for_a_qualifying_listing(tmp_path: Path) -> None:
     listing = make_listing(listing_id="buy-1", price=10.0, shipping=0.0)
     pipeline, _, discord_client = make_pipeline(
