@@ -36,6 +36,8 @@ def _render_alert_html(alert: AlertRecord) -> str:
         parts.append(f"Target-grade figures: {alert.target_grade_count}<br>")
     if alert.cost_per_figure is not None:
         parts.append(f"Cost/figure: ${alert.cost_per_figure:.2f}<br>")
+    if alert.cost_per_weapon is not None:
+        parts.append(f"Cost/weapon: ${alert.cost_per_weapon:.2f}<br>")
     if alert.suggested_offer is not None:
         parts.append(f"Suggested offer: ${alert.suggested_offer:.2f}<br>")
     if alert.max_repro_risk is not None:

@@ -18,6 +18,7 @@ def make_alert(**overrides: object) -> AlertRecord:
         "returns_accepted": True,
         "suggested_offer": None,
         "vision_notes": None,
+        "cost_per_weapon": None,
         "price": 45.0,
         "alerted_at": "2026-07-07T12:00:00Z",
         "reported_at": None,
@@ -39,6 +40,13 @@ def test_format_report_html_includes_title_link_and_cost() -> None:
     assert "https://example.com/1" in html
     assert "4.50" in html
     assert "https://example.com/1.jpg" in html
+
+
+def test_format_report_shows_cost_per_weapon_when_given() -> None:
+    _, html = format_report([make_alert(cost_per_weapon=6.5)])
+
+    assert "6.50" in html
+    assert "weapon" in html.lower()
 
 
 def test_format_report_groups_by_outcome_with_a_heading() -> None:

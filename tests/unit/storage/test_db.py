@@ -55,6 +55,7 @@ def record_sample_alert(db: Database, **overrides: object) -> None:
         "returns_accepted": True,
         "suggested_offer": None,
         "vision_notes": None,
+        "cost_per_weapon": None,
         "price": 45.0,
         "alerted_at": "2026-07-06T00:00:00Z",
     }
@@ -88,6 +89,15 @@ def test_unreported_alerts_round_trips_vision_notes(tmp_path: Path) -> None:
     unreported = db.get_unreported_alerts()
 
     assert unreported[0].vision_notes == "Two droids lack a visible backstamp."
+
+
+def test_unreported_alerts_round_trips_cost_per_weapon(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", cost_per_weapon=6.5)
+
+    unreported = db.get_unreported_alerts()
+
+    assert unreported[0].cost_per_weapon == 6.5
 
 
 def test_opening_a_pre_vision_notes_db_migrates_the_column(tmp_path: Path) -> None:
@@ -149,6 +159,38 @@ def test_opening_a_pre_price_column_db_migrates_the_column(tmp_path: Path) -> No
     record_sample_alert(db, listing_id="1", price=12.5)
 
     assert db.get_unreported_alerts()[0].price == 12.5
+
+
+def test_opening_a_pre_cost_per_weapon_db_migrates_the_column(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE alerts (
+            id INTEGER PRIMARY KEY,
+            source TEXT NOT NULL,
+            listing_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            image_url TEXT,
+            outcome TEXT NOT NULL,
+            cost_per_figure REAL,
+            target_grade_count INTEGER,
+            max_repro_risk TEXT,
+            returns_accepted INTEGER,
+            suggested_offer REAL,
+            vision_notes TEXT,
+            price REAL,
+            alerted_at TEXT NOT NULL,
+            reported_at TEXT
+        )
+        """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    record_sample_alert(db, listing_id="1")
+
+    assert db.get_unreported_alerts()[0].cost_per_weapon is None
 
 
 def test_has_alerted_is_false_for_a_never_alerted_combo(tmp_path: Path) -> None:

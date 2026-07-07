@@ -158,7 +158,11 @@ class Pipeline:
     def _needs_fresh_analysis(self, listing: Listing) -> bool:
         if not self._passes_free_screen(listing):
             return False
-        return not self._vision.has_cached_grade([str(url) for url in listing.images])
+        return not self._vision.has_cached_grade(
+            images=[str(url) for url in listing.images],
+            title=listing.title,
+            description=listing.description,
+        )
 
     def _passes_free_screen(self, listing: Listing) -> bool:
         if not passes_prefilter(
@@ -205,11 +209,12 @@ class Pipeline:
         if not self._passes_free_screen(listing):
             return
 
-        # Grading is billed once per image set (see vision_cache) regardless
-        # of how many times a still-live listing is re-fetched, so re-running
-        # this on every scan costs nothing extra on a repeat listing -- it's
-        # what lets a later price change on the same listing get a fresh
-        # decision instead of being silently dropped forever.
+        # Grading is billed once per images/title/description combo (see
+        # vision_cache) regardless of how many times a still-live listing
+        # is re-fetched, so re-running this on every scan costs nothing
+        # extra on a repeat listing -- it's what lets a later price change
+        # on the same listing get a fresh decision instead of being
+        # silently dropped forever.
         vision_result = self._vision.grade(
             images=[str(url) for url in listing.images],
             title=listing.title,
@@ -246,6 +251,7 @@ class Pipeline:
             price=listing.price,
             shipping=listing.shipping,
             target_grade_count=target_grade_count,
+            authentic_weapon_count=vision_result.authentic_weapon_count,
             total_item_count=len(vision_result.items),
             damaged_or_low_count=damaged_or_low_count,
             confidence=vision_result.min_confidence,
@@ -253,8 +259,15 @@ class Pipeline:
             buying_option=listing.buying_option,
             offers_accepted=listing.offers_accepted,
         )
+        # target_per_weapon defaults to None (price TBD, per the spec) --
+        # 0.0 makes that a no-op: no weapon credit on figure lots, and a
+        # weapon-only lot always skips rather than pricing against nothing.
+        target_per_weapon = self._config.get("target_per_weapon")
         decision_config = DecisionConfig(
             target_per_figure=self._config.get("target_per_figure"),
+            target_per_weapon=(
+                target_per_weapon if target_per_weapon is not None else 0.0
+            ),
             negotiate_band_pct=self._config.get("negotiate_band_pct"),
             max_damage_ratio=self._config.get("max_damage_ratio"),
             confidence_floor=self._config.get("confidence_floor"),
@@ -268,17 +281,48 @@ class Pipeline:
         target_grade_count: int,
         outcome: Outcome,
     ) -> None:
+        authentic_weapon_count = vision_result.authentic_weapon_count
+        target_per_figure = self._config.get("target_per_figure")
+        target_per_weapon = self._config.get("target_per_weapon")
+        target_per_weapon = target_per_weapon if target_per_weapon is not None else 0.0
+        total_cost = listing.price + listing.shipping
+
         cost_per_figure = None
+        cost_per_weapon = None
         if target_grade_count > 0:
-            cost_per_figure = (listing.price + listing.shipping) / target_grade_count
+            weapon_credit = authentic_weapon_count * target_per_weapon
+            effective_cost = max(0.0, total_cost - weapon_credit)
+            cost_per_figure = effective_cost / target_grade_count
+        elif authentic_weapon_count > 0:
+            cost_per_weapon = total_cost / authentic_weapon_count
 
         offer = None
         if outcome == "negotiate":
-            offer = suggested_offer(
-                shipping=listing.shipping,
-                target_grade_count=target_grade_count,
-                target_per_figure=self._config.get("target_per_figure"),
+            if target_grade_count > 0:
+                # The figure-based offer already undercuts target_per_figure
+                # slightly; the weapon credit is added on top at full value
+                # rather than also undercut, since target_per_weapon is
+                # already treated as a fair price, not a haggling ceiling.
+                weapon_credit = authentic_weapon_count * target_per_weapon
+                offer = suggested_offer(
+                    shipping=listing.shipping,
+                    target_grade_count=target_grade_count,
+                    target_per_figure=target_per_figure,
+                )
+                offer = round(offer + weapon_credit, 2)
+            else:
+                offer = suggested_offer(
+                    shipping=listing.shipping,
+                    target_grade_count=authentic_weapon_count,
+                    target_per_figure=target_per_weapon,
+                )
+
+        notes_parts = [vision_result.notes] if vision_result.notes else []
+        if vision_result.rare_items_summary:
+            notes_parts.append(
+                f"⭐ Possible rare item: {vision_result.rare_items_summary}"
             )
+        combined_notes = " | ".join(notes_parts) or None
 
         if self._alerts is not None:
             self._alerts.send(
@@ -286,6 +330,7 @@ class Pipeline:
                     listing,
                     outcome,
                     cost_per_figure=cost_per_figure,
+                    cost_per_weapon=cost_per_weapon,
                     target_grade_count=target_grade_count,
                     suggested_offer=offer,
                     max_repro_risk=vision_result.max_repro_risk,
@@ -304,7 +349,8 @@ class Pipeline:
             max_repro_risk=vision_result.max_repro_risk,
             returns_accepted=listing.returns_accepted,
             suggested_offer=offer,
-            vision_notes=vision_result.notes or None,
+            vision_notes=combined_notes,
+            cost_per_weapon=cost_per_weapon,
             price=listing.price,
             alerted_at=datetime.now(UTC).isoformat(),
         )

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     returns_accepted INTEGER,
     suggested_offer REAL,
     vision_notes TEXT,
+    cost_per_weapon REAL,
     price REAL,
     alerted_at TEXT NOT NULL,
     reported_at TEXT
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS failure_reports (
 _ALERT_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
     ("vision_notes", "ALTER TABLE alerts ADD COLUMN vision_notes TEXT"),
     ("price", "ALTER TABLE alerts ADD COLUMN price REAL"),
+    ("cost_per_weapon", "ALTER TABLE alerts ADD COLUMN cost_per_weapon REAL"),
 ]
 
 
@@ -82,6 +84,7 @@ class AlertRecord:
     returns_accepted: bool
     suggested_offer: float | None
     vision_notes: str | None
+    cost_per_weapon: float | None
     price: float | None
     alerted_at: str
     reported_at: str | None
@@ -90,7 +93,7 @@ class AlertRecord:
 _ALERT_COLUMNS = (
     "id, source, listing_id, title, url, image_url, outcome, cost_per_figure,"
     " target_grade_count, max_repro_risk, returns_accepted, suggested_offer,"
-    " vision_notes, price, alerted_at, reported_at"
+    " vision_notes, cost_per_weapon, price, alerted_at, reported_at"
 )
 
 
@@ -137,9 +140,10 @@ def _row_to_alert_record(row: tuple[object, ...]) -> AlertRecord:
         returns_accepted=bool(row[10]),
         suggested_offer=row[11],  # type: ignore[arg-type]
         vision_notes=row[12],  # type: ignore[arg-type]
-        price=row[13],  # type: ignore[arg-type]
-        alerted_at=row[14],  # type: ignore[arg-type]
-        reported_at=row[15],  # type: ignore[arg-type]
+        cost_per_weapon=row[13],  # type: ignore[arg-type]
+        price=row[14],  # type: ignore[arg-type]
+        alerted_at=row[15],  # type: ignore[arg-type]
+        reported_at=row[16],  # type: ignore[arg-type]
     )
 
 
@@ -234,6 +238,7 @@ class Database:
         returns_accepted: bool,
         suggested_offer: float | None,
         vision_notes: str | None,
+        cost_per_weapon: float | None,
         price: float | None,
         alerted_at: str,
     ) -> None:
@@ -243,9 +248,9 @@ class Database:
                 INSERT INTO alerts (
                     source, listing_id, title, url, image_url, outcome,
                     cost_per_figure, target_grade_count, max_repro_risk,
-                    returns_accepted, suggested_offer, vision_notes, price,
-                    alerted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    returns_accepted, suggested_offer, vision_notes,
+                    cost_per_weapon, price, alerted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -260,6 +265,7 @@ class Database:
                     int(returns_accepted),
                     suggested_offer,
                     vision_notes,
+                    cost_per_weapon,
                     price,
                     alerted_at,
                 ),

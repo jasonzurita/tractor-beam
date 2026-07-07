@@ -30,6 +30,15 @@ def test_format_alert_includes_optional_figures_when_given() -> None:
     assert "low" in payload["content"]
 
 
+def test_format_alert_shows_cost_per_weapon_when_given() -> None:
+    listing = make_listing()
+
+    payload = format_alert(listing, "buy", cost_per_weapon=6.5)
+
+    assert "6.50" in payload["content"]
+    assert "weapon" in payload["content"].lower()
+
+
 def test_format_alert_shows_returns_accepted_when_given() -> None:
     listing = make_listing()
 

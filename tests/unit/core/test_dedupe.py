@@ -24,6 +24,7 @@ def record_alert_for(db: Database, listing: Listing, *, outcome: str = "buy") ->
         returns_accepted=False,
         suggested_offer=None,
         vision_notes=None,
+        cost_per_weapon=None,
         price=listing.price,
         alerted_at="2026-07-06T00:00:00Z",
     )

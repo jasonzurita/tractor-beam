@@ -3,7 +3,7 @@ from pathlib import Path
 
 from sw_sourcing.alerts.discord import DiscordAlerts
 from sw_sourcing.core.dedupe import Dedupe
-from sw_sourcing.core.vision import Vision, hash_image_set
+from sw_sourcing.core.vision import Vision, hash_listing_content
 from sw_sourcing.pipeline import Pipeline
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
@@ -216,7 +216,11 @@ def test_run_pages_deeper_when_the_first_page_has_no_fresh_listings(
     # Pre-cache `stale`'s grade so page 0 contributes zero *fresh* analyses,
     # forcing the pipeline to page deeper to fill the budget of 1.
     db.put_vision_cache(
-        hash_image_set(["https://example.com/stale.jpg"]),
+        hash_listing_content(
+            images=["https://example.com/stale.jpg"],
+            title=stale.title,
+            description=stale.description,
+        ),
         BUY_RESULT,
         created_at="2026-07-06T00:00:00Z",
     )

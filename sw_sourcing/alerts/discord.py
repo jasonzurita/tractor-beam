@@ -27,6 +27,7 @@ def format_alert(
     outcome: Outcome,
     *,
     cost_per_figure: float | None = None,
+    cost_per_weapon: float | None = None,
     target_grade_count: int | None = None,
     suggested_offer: float | None = None,
     max_repro_risk: str | None = None,
@@ -39,6 +40,8 @@ def format_alert(
         lines.append(f"Target-grade figures: {target_grade_count}")
     if cost_per_figure is not None:
         lines.append(f"Cost/figure: ${cost_per_figure:.2f}")
+    if cost_per_weapon is not None:
+        lines.append(f"Cost/weapon: ${cost_per_weapon:.2f}")
     if suggested_offer is not None:
         lines.append(f"Suggested offer: ${suggested_offer:.2f}")
     if max_repro_risk is not None:
