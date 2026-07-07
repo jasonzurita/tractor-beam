@@ -87,6 +87,24 @@ def test_fetch_sends_the_bearer_token_and_marketplace_header() -> None:
     assert captured[0].headers["X-EBAY-C-MARKETPLACE-ID"] == "EBAY_US"
 
 
+def test_fetch_sorts_by_newly_listed_so_repeat_scans_see_fresh_inventory() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=FIXTURE)
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport, base_url="https://api.ebay.com")
+    adapter = EbayAdapter(
+        app_token="fake-token", query="vintage kenner star wars", client=client
+    )
+
+    adapter.fetch()
+
+    assert captured[0].url.params["sort"] == "newlyListed"
+
+
 def test_get_ebay_access_token_returns_the_token_from_the_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

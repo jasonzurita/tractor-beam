@@ -141,7 +141,9 @@ def test_run_skips_off_topic_listings_without_calling_vision(tmp_path: Path) -> 
     assert summary.alerts_sent == 0
 
 
-def test_run_never_reprocesses_a_listing_already_seen(tmp_path: Path) -> None:
+def test_run_does_not_realert_the_same_listing_at_an_unchanged_price(
+    tmp_path: Path,
+) -> None:
     listing = make_listing(listing_id="dupe-1", price=10.0, shipping=0.0)
     pipeline, vision_client, _, _ = make_pipeline(
         tmp_path, {"ebay": FakeAdapter([listing])}, vision_response=BUY_RESULT
