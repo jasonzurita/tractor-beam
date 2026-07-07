@@ -61,9 +61,9 @@ Design rule: **every source is a plug-in adapter that outputs one common shape.*
 | eBay source | eBay Browse API (direct) | Sanctioned, free, reliable |
 | Tier-2 sources | Apify actors (or similar managed scraper) | Rent the anti-bot maintenance |
 | Facebook Marketplace | Browser-assist / human-in-loop (v1) | Avoid ban risk (see §7) |
-| Vision | Anthropic Claude API, vision-capable model | Grade + repro-risk pass |
+| Vision | `claude` CLI (no API key provisioned for this project) | Grade + repro-risk pass |
 | Data store | SQLite file | Zero-cost, local; dedupe + config + history |
-| Alerts | Discord webhook | Free, image-rich, mobile push, per-channel routing |
+| Alerts | Email digest (SMTP), Discord webhook optional | Digest decouples notification cadence from scan cadence; Discord push available if configured |
 | (Optional) Review UI | Airtable | Nicer triage queue; add later |
 
 > Verify current Claude model names and per-token pricing at https://docs.claude.com/en/api/overview before finalizing the budget.
@@ -210,10 +210,12 @@ CREATE TABLE seen_listings (
 CREATE TABLE vision_cache (image_set_hash TEXT PRIMARY KEY, result_json TEXT, created_at TEXT);
 CREATE TABLE alerts (
   id INTEGER PRIMARY KEY, source TEXT, listing_id TEXT,
+  title TEXT, url TEXT, image_url TEXT,
   outcome TEXT,                      -- buy | negotiate | review
   cost_per_figure REAL, target_grade_count INTEGER,
   max_repro_risk TEXT, returns_accepted INTEGER,
-  suggested_offer REAL, alerted_at TEXT
+  suggested_offer REAL, alerted_at TEXT,
+  reported_at TEXT                   -- NULL until picked up by a digest send
 );
 CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE runs (
@@ -240,9 +242,10 @@ These are **invariants** — see `CLAUDE.md`.
 
 ## 13. Reliability
 
-- **Source isolation** — one adapter failing never stops the run.
+- **Source isolation** — one adapter failing never stops the run; a bad listing never stops the rest of its batch either.
 - **Backoff + jitter** — respect rate limits.
-- **Heartbeat** — each run posts a one-liner to Discord.
+- **Heartbeat** — each run posts a one-liner to Discord, if configured (optional).
+- **Bug reports, not auto-fix** — adapter/listing failures and unhandled errors write a markdown report (context + traceback + repro) to `bug_reports/` for periodic manual review with Claude Code. Nothing self-modifies unattended.
 - **Managed scrapers** for defended sites.
 
 ---
