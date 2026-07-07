@@ -19,12 +19,12 @@ Buying profile: mid-to-high-grade figures at ~$5/good figure. Weapons and access
 2. **Separation of concerns.** `adapters/` *fetch*, `core/` *decides*, `storage/` *persists*, `alerts/` *deliver*. Layers talk through typed interfaces, not internals.
 3. **The core is source-agnostic.** Nothing in `core/` may import an adapter or branch on a hardcoded source name. Adapters normalize to the `Listing` schema; the core only sees `Listing` objects.
 4. **Config over hardcoding.** Thresholds, cadences, enabled sources → the `config` table, never literals in code.
-5. **Idempotency.** A listing is processed and alerted at most once (dedupe on `(source, listing_id)`).
+5. **Idempotency, not amnesia.** A listing is re-evaluated on every fetch (a price cut on a previously seen listing must get a fresh decision), but only re-**alerted** if its outcome or price changed since the last alert (dedupe on `(source, listing_id, outcome, price)`).
 6. **Graceful degradation.** One source failing logs and is skipped; it never aborts the run.
 7. **Cost invariants (never regress these):**
    - Never call the vision model before the cheap pre-filter passes.
-   - Always check `vision_cache` before a vision call, keyed by a hash of the listing's **full image set** (all photos hashed together — grading is one request per listing, not per photo).
-   - Never re-process a deduped listing.
+   - Always check `vision_cache` before a vision call, keyed by a hash of the listing's **full image set plus its title and description** (all photos hashed together with the listing text — grading is one request per listing, not per photo, and an edited title/description invalidates the cache same as new photos would).
+   - Never bill a second vision call for a listing whose images/title/description are unchanged from a prior grade.
 8. **ToS guardrails.** No headless Facebook scraping — FB is human-in-the-loop only. Never auto-message sellers on any platform. Scrape only public listing data on Tier-2 sources.
 9. **Authenticity is a hard gate — it overrides price.** Photo analysis *flags repro risk*, it never *certifies authenticity*. No item above `max_repro_risk_for_autobuy` (default `low`) is ever auto-bought — it routes to **manual review**. A cheap repro-risky lot is a skip, never a buy. Bias buys toward `returns_accepted: true` so a wrong call is reversible. Final authenticity is a human in-hand step outside the code; the system must never present itself as the guarantee.
 10. **Pure business logic.** `decision.py`, `negotiation.py`, `prefilter.py`, `authenticity.py` are pure functions (inputs → outputs, no I/O). Keep them that way.
