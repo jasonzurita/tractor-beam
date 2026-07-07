@@ -11,6 +11,7 @@ twice.
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 import tempfile
 from collections.abc import Sequence
@@ -176,14 +177,19 @@ def build_prompt(*, title: str, description: str, image_paths: Sequence[Path]) -
 
 
 def extract_json(text: str) -> str:
-    """Strip a ```-fenced code block if the model added one anyway."""
+    """Strip a ```-fenced code block if the model added one anyway, and
+    drop any trailing commentary the model appended after the JSON object
+    despite being told to return only JSON."""
     stripped = text.strip()
     if stripped.startswith("```"):
         lines = stripped.splitlines()[1:]
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         stripped = "\n".join(lines)
-    return stripped.strip()
+    stripped = stripped.strip()
+
+    _, end = json.JSONDecoder().raw_decode(stripped)
+    return stripped[:end]
 
 
 class ClaudeCliVisionClient:

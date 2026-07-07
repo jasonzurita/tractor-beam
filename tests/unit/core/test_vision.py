@@ -203,3 +203,8 @@ def test_extract_json_strips_markdown_fence_with_language_tag() -> None:
 def test_extract_json_strips_fence_without_language_tag() -> None:
     fenced = '```\n{"a": 1}\n```'
     assert extract_json(fenced) == '{"a": 1}'
+
+
+def test_extract_json_drops_trailing_commentary_after_the_json_object() -> None:
+    text = '{"a": 1}\nThese are genuine vintage stock.'
+    assert extract_json(text) == '{"a": 1}'
