@@ -157,8 +157,8 @@ Changing any of these requires an updated test **and** a config default change �
 
 - `target_per_figure` (default 5.00), computed against **mid+ grade, undamaged, `repro_risk: low`** figures only.
 - `grade_floor` = "mid" — the vision gate grades; low-grade and damaged figures do not count.
-- **Weapons and accessories are wanted** (target price TBD, configurable) — but subject to the same authenticity gate as everything else.
-- **Authenticity is mandatory and overrides price.** `max_repro_risk_for_autobuy` = "low"; anything above routes to manual review. Disclosed-repro listings (keyword blocklist) are skipped. This rule may not be relaxed for a cheaper price.
+- **Weapons and accessories are wanted** (`target_per_weapon`, default 8.00 -- a placeholder, no real comps yet) — credited toward a figure lot's effective cost, or priced standalone for a weapon-only lot — but subject to the same authenticity gate as everything else.
+- **Authenticity is mandatory and overrides price.** `max_repro_risk_for_autobuy` = "low"; anything above routes to manual review. A `rare_candidate` item (see `core/vision.py`) always routes to manual review too, regardless of its own repro-risk score -- rarity is never a discount on scrutiny. Disclosed-repro listings (keyword blocklist) are skipped. This rule may not be relaxed for a cheaper price.
 - `negotiate_band_pct` (default 0.35); negotiate alerts only on offer-accepting, haggle-friendly sources — never live auctions.
 
 ---
