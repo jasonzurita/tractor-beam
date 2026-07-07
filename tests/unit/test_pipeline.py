@@ -46,11 +46,14 @@ def make_pipeline(
     *,
     vision_response: str = '{"items": [], "photo_quality": "clear", "notes": ""}',
     fail_first: bool = False,
-) -> tuple[Pipeline, FakeVisionClient, FakeHttpxClient]:
+    always_fail: bool = False,
+) -> tuple[Pipeline, FakeVisionClient, FakeHttpxClient, Database]:
     db = Database(tmp_path / "test.db")
     config = Config(db)
     dedupe = Dedupe(db)
-    vision_client = FakeVisionClient(vision_response, fail_first=fail_first)
+    vision_client = FakeVisionClient(
+        vision_response, fail_first=fail_first, always_fail=always_fail
+    )
     vision = Vision(vision_client, db)
     discord_client = FakeHttpxClient()
     alerts = DiscordAlerts("https://discord.example/webhook", client=discord_client)  # type: ignore[arg-type]
@@ -63,7 +66,7 @@ def make_pipeline(
         db=db,
         alerts=alerts,
     )
-    return pipeline, vision_client, discord_client
+    return pipeline, vision_client, discord_client, db
 
 
 def test_run_works_without_discord_configured_and_still_persists_alerts(
@@ -95,7 +98,7 @@ def test_run_works_without_discord_configured_and_still_persists_alerts(
 
 def test_run_sends_a_buy_alert_for_a_qualifying_listing(tmp_path: Path) -> None:
     listing = make_listing(listing_id="buy-1", price=10.0, shipping=0.0)
-    pipeline, _, discord_client = make_pipeline(
+    pipeline, _, discord_client, _ = make_pipeline(
         tmp_path, {"ebay": FakeAdapter([listing])}, vision_response=BUY_RESULT
     )
 
@@ -112,7 +115,7 @@ def test_run_skips_disclosed_repro_without_calling_vision(tmp_path: Path) -> Non
     listing = make_listing(
         listing_id="repro-1", description="This lot includes a reproduction weapon"
     )
-    pipeline, vision_client, _ = make_pipeline(
+    pipeline, vision_client, _, _ = make_pipeline(
         tmp_path, {"ebay": FakeAdapter([listing])}
     )
 
@@ -128,7 +131,7 @@ def test_run_skips_off_topic_listings_without_calling_vision(tmp_path: Path) -> 
         title="Modern toy",
         description="brand new, unrelated item",
     )
-    pipeline, vision_client, _ = make_pipeline(
+    pipeline, vision_client, _, _ = make_pipeline(
         tmp_path, {"ebay": FakeAdapter([listing])}
     )
 
@@ -140,7 +143,7 @@ def test_run_skips_off_topic_listings_without_calling_vision(tmp_path: Path) -> 
 
 def test_run_never_reprocesses_a_listing_already_seen(tmp_path: Path) -> None:
     listing = make_listing(listing_id="dupe-1", price=10.0, shipping=0.0)
-    pipeline, vision_client, _ = make_pipeline(
+    pipeline, vision_client, _, _ = make_pipeline(
         tmp_path, {"ebay": FakeAdapter([listing])}, vision_response=BUY_RESULT
     )
 
@@ -153,6 +156,36 @@ def test_run_never_reprocesses_a_listing_already_seen(tmp_path: Path) -> None:
     assert vision_client.calls == 1  # never re-billed on the reseen listing
 
 
+def test_run_persists_the_vision_models_notes_on_the_alert(tmp_path: Path) -> None:
+    result_with_notes = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "figure",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "No backstamp visible on one droid; recommend a closer look.",
+        }
+    )
+    listing = make_listing(listing_id="notes-1", price=5.0, shipping=0.0)
+    pipeline, _, _, db = make_pipeline(
+        tmp_path, {"ebay": FakeAdapter([listing])}, vision_response=result_with_notes
+    )
+
+    pipeline.run()
+
+    unreported = db.get_unreported_alerts()
+    assert unreported[0].vision_notes == (
+        "No backstamp visible on one droid; recommend a closer look."
+    )
+
+
 def test_run_isolates_a_failing_adapter_and_still_processes_others(
     tmp_path: Path,
 ) -> None:
@@ -161,7 +194,7 @@ def test_run_isolates_a_failing_adapter_and_still_processes_others(
         "broken": FakeAdapter(error=RuntimeError("source down")),
         "ebay": FakeAdapter([good_listing]),
     }
-    pipeline, _, _ = make_pipeline(tmp_path, adapters, vision_response=BUY_RESULT)
+    pipeline, _, _, _ = make_pipeline(tmp_path, adapters, vision_response=BUY_RESULT)
 
     summary = pipeline.run()
 
@@ -172,7 +205,7 @@ def test_run_isolates_a_failing_adapter_and_still_processes_others(
 
 def test_run_writes_a_bug_report_when_an_adapter_fails(tmp_path: Path) -> None:
     adapters = {"broken": FakeAdapter(error=RuntimeError("source down"))}
-    pipeline, _, _ = make_pipeline(tmp_path, adapters)
+    pipeline, _, _, _ = make_pipeline(tmp_path, adapters)
 
     summary = pipeline.run()
 
@@ -191,7 +224,7 @@ def test_run_isolates_a_failing_listing_and_still_processes_the_rest(
     listing_b = make_listing(
         listing_id="b", price=10.0, shipping=0.0, images=["https://example.com/b.jpg"]
     )
-    pipeline, vision_client, _ = make_pipeline(
+    pipeline, vision_client, _, _ = make_pipeline(
         tmp_path,
         {"ebay": FakeAdapter([listing_a, listing_b])},
         vision_response=BUY_RESULT,
@@ -204,11 +237,31 @@ def test_run_isolates_a_failing_listing_and_still_processes_the_rest(
     assert summary.alerts_sent == 1  # listing_a's grading failed; listing_b succeeded
 
 
+def test_run_retries_a_listing_after_a_grading_failure_instead_of_dropping_it(
+    tmp_path: Path,
+) -> None:
+    listing = make_listing(listing_id="retry-1", price=10.0, shipping=0.0)
+    pipeline, vision_client, _, _ = make_pipeline(
+        tmp_path,
+        {"ebay": FakeAdapter([listing])},
+        vision_response=BUY_RESULT,
+        fail_first=True,
+    )
+
+    first = pipeline.run()
+    assert first.alerts_sent == 0
+    assert vision_client.calls == 1
+
+    second = pipeline.run()
+    assert second.alerts_sent == 1  # retried on the next run, not dropped forever
+    assert vision_client.calls == 2
+
+
 def test_run_writes_a_bug_report_when_a_listing_fails_to_process(
     tmp_path: Path,
 ) -> None:
     listing = make_listing(listing_id="a", price=10.0, shipping=0.0)
-    pipeline, _, _ = make_pipeline(
+    pipeline, _, _, _ = make_pipeline(
         tmp_path,
         {"ebay": FakeAdapter([listing])},
         vision_response=BUY_RESULT,
@@ -227,7 +280,7 @@ def test_run_writes_a_bug_report_when_a_listing_fails_to_process(
 
 def test_run_sends_a_heartbeat_after_processing(tmp_path: Path) -> None:
     listing = make_listing(listing_id="hb-1", price=10.0, shipping=0.0)
-    pipeline, _, discord_client = make_pipeline(
+    pipeline, _, discord_client, _ = make_pipeline(
         tmp_path, {"ebay": FakeAdapter([listing])}, vision_response=BUY_RESULT
     )
 
@@ -239,3 +292,60 @@ def test_run_sends_a_heartbeat_after_processing(tmp_path: Path) -> None:
         if "Run complete" in payload["content"]
     ]
     assert len(heartbeats) == 1
+
+
+def test_run_suppresses_repeat_bug_reports_for_the_same_listing_within_cooldown(
+    tmp_path: Path,
+) -> None:
+    listing = make_listing(listing_id="always-fails", price=10.0, shipping=0.0)
+    pipeline, vision_client, _, _ = make_pipeline(
+        tmp_path,
+        {"ebay": FakeAdapter([listing])},
+        vision_response=BUY_RESULT,
+        always_fail=True,
+    )
+
+    first = pipeline.run()
+    second = pipeline.run()
+
+    assert first.bug_reports_written == 1
+    assert second.bug_reports_written == 0  # same listing, still within cooldown
+    assert vision_client.calls == 2  # the retry itself still happens every run
+    assert len(list((tmp_path / "bug_reports").glob("*.md"))) == 1
+
+
+def test_run_writes_a_new_bug_report_once_the_cooldown_expires(
+    tmp_path: Path,
+) -> None:
+    listing = make_listing(listing_id="always-fails", price=10.0, shipping=0.0)
+    pipeline, _, _, db = make_pipeline(
+        tmp_path,
+        {"ebay": FakeAdapter([listing])},
+        vision_response=BUY_RESULT,
+        always_fail=True,
+    )
+
+    first = pipeline.run()
+    assert first.bug_reports_written == 1
+
+    db.record_failure_report(
+        f"listing:{listing.source}:{listing.listing_id}",
+        reported_at="2020-01-01T00:00:00+00:00",
+    )
+    second = pipeline.run()
+
+    assert second.bug_reports_written == 1
+    assert len(list((tmp_path / "bug_reports").glob("*.md"))) == 2
+
+
+def test_run_suppresses_repeat_bug_reports_for_the_same_failing_adapter(
+    tmp_path: Path,
+) -> None:
+    adapters = {"broken": FakeAdapter(error=RuntimeError("source down"))}
+    pipeline, _, _, _ = make_pipeline(tmp_path, adapters)
+
+    first = pipeline.run()
+    second = pipeline.run()
+
+    assert first.bug_reports_written == 1
+    assert second.bug_reports_written == 0

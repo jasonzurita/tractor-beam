@@ -34,19 +34,23 @@ class FakeVisionClient:
     """A canned VisionClient for tests -- never touches a real model.
 
     `fail_first` simulates one bad listing among many, to prove batch
-    processing survives a single grading failure.
+    processing survives a single grading failure. `always_fail` simulates a
+    persistently (not just transiently) broken listing.
     """
 
-    def __init__(self, response: str, *, fail_first: bool = False) -> None:
+    def __init__(
+        self, response: str, *, fail_first: bool = False, always_fail: bool = False
+    ) -> None:
         self.response = response
         self.calls = 0
         self._fail_first = fail_first
+        self._always_fail = always_fail
 
     def grade_listing(
         self, *, images: Sequence[str], title: str, description: str
     ) -> str:
         self.calls += 1
-        if self._fail_first and self.calls == 1:
+        if self._always_fail or (self._fail_first and self.calls == 1):
             raise RuntimeError("simulated grading failure")
         return self.response
 

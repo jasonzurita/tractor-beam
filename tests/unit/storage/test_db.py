@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 from sw_sourcing.storage.db import Database
@@ -77,6 +78,7 @@ def record_sample_alert(db: Database, **overrides: object) -> None:
         "max_repro_risk": "low",
         "returns_accepted": True,
         "suggested_offer": None,
+        "vision_notes": None,
         "alerted_at": "2026-07-06T00:00:00Z",
     }
     defaults.update(overrides)
@@ -98,6 +100,47 @@ def test_unreported_alerts_returns_a_freshly_recorded_alert(tmp_path: Path) -> N
     assert unreported[0].listing_id == "1"
     assert unreported[0].title == "Vintage Kenner lot"
     assert unreported[0].reported_at is None
+
+
+def test_unreported_alerts_round_trips_vision_notes(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(
+        db, listing_id="1", vision_notes="Two droids lack a visible backstamp."
+    )
+
+    unreported = db.get_unreported_alerts()
+
+    assert unreported[0].vision_notes == "Two droids lack a visible backstamp."
+
+
+def test_opening_a_pre_vision_notes_db_migrates_the_column(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE alerts (
+            id INTEGER PRIMARY KEY,
+            source TEXT NOT NULL,
+            listing_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            image_url TEXT,
+            outcome TEXT NOT NULL,
+            cost_per_figure REAL,
+            target_grade_count INTEGER,
+            max_repro_risk TEXT,
+            returns_accepted INTEGER,
+            suggested_offer REAL,
+            alerted_at TEXT NOT NULL,
+            reported_at TEXT
+        )
+        """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    record_sample_alert(db, listing_id="1")
+
+    assert db.get_unreported_alerts()[0].vision_notes is None
 
 
 def test_marking_reported_removes_it_from_unreported(tmp_path: Path) -> None:
@@ -134,3 +177,30 @@ def test_record_run_does_not_raise(tmp_path: Path) -> None:
         listings_seen=5,
         alerts_sent=1,
     )
+
+
+def test_get_last_failure_report_returns_none_when_never_recorded(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    assert db.get_last_failure_report("listing:ebay:1") is None
+
+
+def test_record_and_get_last_failure_report_round_trips(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    db.record_failure_report("listing:ebay:1", reported_at="2026-07-07T00:00:00Z")
+    assert db.get_last_failure_report("listing:ebay:1") == "2026-07-07T00:00:00Z"
+
+
+def test_record_failure_report_twice_updates_without_raising(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    db.record_failure_report("listing:ebay:1", reported_at="2026-07-07T00:00:00Z")
+    db.record_failure_report("listing:ebay:1", reported_at="2026-07-08T00:00:00Z")
+    assert db.get_last_failure_report("listing:ebay:1") == "2026-07-08T00:00:00Z"
+
+
+def test_failure_report_keys_are_independent(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    db.record_failure_report("listing:ebay:1", reported_at="2026-07-07T00:00:00Z")
+    assert db.get_last_failure_report("listing:ebay:2") is None
+    assert db.get_last_failure_report("adapter:ebay") is None

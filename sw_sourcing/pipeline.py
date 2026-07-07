@@ -23,7 +23,11 @@ from sw_sourcing.core.negotiation import suggested_offer
 from sw_sourcing.core.prefilter import passes_prefilter
 from sw_sourcing.core.schema import Listing
 from sw_sourcing.core.vision import Vision, VisionResult
-from sw_sourcing.diagnostics import DEFAULT_REPORTS_DIR, write_report
+from sw_sourcing.diagnostics import (
+    DEFAULT_REPORTS_DIR,
+    should_report_failure,
+    write_report,
+)
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
 
@@ -72,13 +76,13 @@ class Pipeline:
             except Exception as exc:
                 logger.exception("Adapter %s failed; skipping this run", source)
                 summary.sources_failed.append(source)
-                write_report(
-                    summary=f"Adapter {source} failed during fetch()",
+                self._maybe_write_report(
+                    key=f"adapter:{source}",
+                    summary_text=f"Adapter {source} failed during fetch()",
                     context={"source": source},
                     exception=exc,
-                    reports_dir=self._bug_reports_dir,
+                    run_summary=summary,
                 )
-                summary.bug_reports_written += 1
                 continue
 
             summary.sources_ok.append(source)
@@ -92,16 +96,16 @@ class Pipeline:
                         listing.source,
                         listing.listing_id,
                     )
-                    write_report(
-                        summary=(
+                    self._maybe_write_report(
+                        key=f"listing:{listing.source}:{listing.listing_id}",
+                        summary_text=(
                             f"Failed to process listing {listing.source}/"
                             f"{listing.listing_id}"
                         ),
                         context={"listing": listing},
                         exception=exc,
-                        reports_dir=self._bug_reports_dir,
+                        run_summary=summary,
                     )
-                    summary.bug_reports_written += 1
 
         self._db.record_run(
             started_at=started_at,
@@ -122,10 +126,36 @@ class Pipeline:
             )
         return summary
 
+    def _maybe_write_report(
+        self,
+        *,
+        key: str,
+        summary_text: str,
+        context: dict[str, object],
+        exception: Exception,
+        run_summary: RunSummary,
+    ) -> None:
+        """Write a bug report unless one for this exact failure key already
+        went out within the cooldown window -- a persistently (not just
+        transiently) failing source/listing shouldn't produce a fresh
+        report every single run.
+        """
+        now = datetime.now(UTC)
+        last_reported_at = self._db.get_last_failure_report(key)
+        if not should_report_failure(last_reported_at, now=now):
+            return
+        write_report(
+            summary=summary_text,
+            context=context,
+            exception=exception,
+            reports_dir=self._bug_reports_dir,
+        )
+        self._db.record_failure_report(key, reported_at=now.isoformat())
+        run_summary.bug_reports_written += 1
+
     def _process(self, listing: Listing, summary: RunSummary) -> None:
         if not self._dedupe.is_new(listing):
             return
-        self._dedupe.mark_processed(listing, seen_at=datetime.now(UTC).isoformat())
 
         if not passes_prefilter(
             listing,
@@ -146,6 +176,10 @@ class Pipeline:
             description=listing.description,
             graded_at=datetime.now(UTC).isoformat(),
         )
+        # Marked only after a successful grade, so a transient grading
+        # failure (bad model output, network error) leaves the listing
+        # retryable on the next run instead of dropping it forever.
+        self._dedupe.mark_processed(listing, seen_at=datetime.now(UTC).isoformat())
         target_grade_count = vision_result.target_grade_count(
             grade_floor=self._config.get("grade_floor")
         )
@@ -230,5 +264,6 @@ class Pipeline:
             max_repro_risk=vision_result.max_repro_risk,
             returns_accepted=listing.returns_accepted,
             suggested_offer=offer,
+            vision_notes=vision_result.notes or None,
             alerted_at=datetime.now(UTC).isoformat(),
         )

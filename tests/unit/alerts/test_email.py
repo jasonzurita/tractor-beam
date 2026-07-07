@@ -17,6 +17,7 @@ def make_alert(**overrides: object) -> AlertRecord:
         "max_repro_risk": "low",
         "returns_accepted": True,
         "suggested_offer": None,
+        "vision_notes": None,
         "alerted_at": "2026-07-07T12:00:00Z",
         "reported_at": None,
     }
@@ -61,6 +62,27 @@ def test_format_report_omits_image_when_none() -> None:
     _, html = format_report([make_alert(image_url=None)])
 
     assert "<img" not in html
+
+
+def test_format_report_includes_vision_notes_when_present() -> None:
+    _, html = format_report(
+        [make_alert(vision_notes="Two droids lack a visible backstamp.")]
+    )
+
+    assert "Two droids lack a visible backstamp." in html
+
+
+def test_format_report_omits_notes_block_when_absent() -> None:
+    _, html = format_report([make_alert(vision_notes=None)])
+
+    assert "Notes" not in html
+
+
+def test_format_report_escapes_html_in_vision_notes() -> None:
+    _, html = format_report([make_alert(vision_notes="<script>alert('x')</script>")])
+
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
 
 
 def test_email_sender_logs_in_and_sends_the_message() -> None:

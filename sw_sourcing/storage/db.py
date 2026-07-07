@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     max_repro_risk TEXT,
     returns_accepted INTEGER,
     suggested_offer REAL,
+    vision_notes TEXT,
     alerted_at TEXT NOT NULL,
     reported_at TEXT
 );
@@ -57,7 +58,19 @@ CREATE TABLE IF NOT EXISTS runs (
     listings_seen INTEGER,
     alerts_sent INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS failure_reports (
+    key TEXT PRIMARY KEY,
+    last_reported_at TEXT NOT NULL
+);
 """
+
+# CREATE TABLE IF NOT EXISTS won't retroactively add a new column to a
+# table that already existed on disk -- new columns on an existing table
+# need an explicit ALTER TABLE here, checked against what's actually there.
+_ALERT_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
+    ("vision_notes", "ALTER TABLE alerts ADD COLUMN vision_notes TEXT"),
+]
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,7 @@ class AlertRecord:
     max_repro_risk: str | None
     returns_accepted: bool
     suggested_offer: float | None
+    vision_notes: str | None
     alerted_at: str
     reported_at: str | None
 
@@ -81,7 +95,7 @@ class AlertRecord:
 _ALERT_COLUMNS = (
     "id, source, listing_id, title, url, image_url, outcome, cost_per_figure,"
     " target_grade_count, max_repro_risk, returns_accepted, suggested_offer,"
-    " alerted_at, reported_at"
+    " vision_notes, alerted_at, reported_at"
 )
 
 
@@ -99,8 +113,9 @@ def _row_to_alert_record(row: tuple[object, ...]) -> AlertRecord:
         max_repro_risk=row[9],  # type: ignore[arg-type]
         returns_accepted=bool(row[10]),
         suggested_offer=row[11],  # type: ignore[arg-type]
-        alerted_at=row[12],  # type: ignore[arg-type]
-        reported_at=row[13],  # type: ignore[arg-type]
+        vision_notes=row[12],  # type: ignore[arg-type]
+        alerted_at=row[13],  # type: ignore[arg-type]
+        reported_at=row[14],  # type: ignore[arg-type]
     )
 
 
@@ -111,6 +126,13 @@ class Database:
         self._path = str(path)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(alerts)")}
+        for column, ddl in _ALERT_COLUMN_MIGRATIONS:
+            if column not in existing_columns:
+                conn.execute(ddl)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -194,6 +216,7 @@ class Database:
         max_repro_risk: str | None,
         returns_accepted: bool,
         suggested_offer: float | None,
+        vision_notes: str | None,
         alerted_at: str,
     ) -> None:
         with self._connect() as conn:
@@ -202,8 +225,8 @@ class Database:
                 INSERT INTO alerts (
                     source, listing_id, title, url, image_url, outcome,
                     cost_per_figure, target_grade_count, max_repro_risk,
-                    returns_accepted, suggested_offer, alerted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    returns_accepted, suggested_offer, vision_notes, alerted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -217,6 +240,7 @@ class Database:
                     max_repro_risk,
                     int(returns_accepted),
                     suggested_offer,
+                    vision_notes,
                     alerted_at,
                 ),
             )
@@ -237,6 +261,24 @@ class Database:
             conn.execute(
                 f"UPDATE alerts SET reported_at = ? WHERE id IN ({placeholders})",
                 (reported_at, *alert_ids),
+            )
+
+    def get_last_failure_report(self, key: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_reported_at FROM failure_reports WHERE key = ?", (key,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def record_failure_report(self, key: str, *, reported_at: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO failure_reports (key, last_reported_at) VALUES (?, ?)
+                ON CONFLICT (key)
+                DO UPDATE SET last_reported_at = excluded.last_reported_at
+                """,
+                (key, reported_at),
             )
 
     def record_run(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import traceback
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -19,6 +19,26 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 DEFAULT_REPORTS_DIR = Path("bug_reports")
+DEFAULT_FAILURE_COOLDOWN_HOURS = 24.0
+
+
+def should_report_failure(
+    last_reported_at: str | None,
+    *,
+    now: datetime,
+    cooldown_hours: float = DEFAULT_FAILURE_COOLDOWN_HOURS,
+) -> bool:
+    """True if enough time has passed since the last report for this exact
+    failure key to write a new one.
+
+    Caps repeated reports for a persistently (not just transiently) failing
+    source or listing -- a listing that fails every 15 minutes shouldn't
+    produce a fresh report every 15 minutes.
+    """
+    if last_reported_at is None:
+        return True
+    elapsed = now - datetime.fromisoformat(last_reported_at)
+    return elapsed >= timedelta(hours=cooldown_hours)
 
 
 def _slugify(text: str) -> str:

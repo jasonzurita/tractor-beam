@@ -9,6 +9,7 @@ code change.
 
 from __future__ import annotations
 
+import html
 import smtplib
 from collections.abc import Callable, Sequence
 from email.message import EmailMessage
@@ -40,6 +41,8 @@ def _render_alert_html(alert: AlertRecord) -> str:
     if alert.max_repro_risk is not None:
         parts.append(f"Repro risk: {alert.max_repro_risk}<br>")
     parts.append(f"Returns accepted: {'yes' if alert.returns_accepted else 'no'}<br>")
+    if alert.vision_notes:
+        parts.append(f"Notes: {html.escape(alert.vision_notes)}<br>")
     parts.append("</div><hr>")
     return "".join(parts)
 

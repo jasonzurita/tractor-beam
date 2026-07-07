@@ -1,6 +1,7 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
-from sw_sourcing.diagnostics import write_report
+from sw_sourcing.diagnostics import should_report_failure, write_report
 
 
 def test_write_report_creates_a_file_in_the_reports_dir(tmp_path: Path) -> None:
@@ -75,3 +76,29 @@ def test_write_report_serializes_a_pydantic_model_in_context(tmp_path: Path) -> 
     )
 
     assert "p1" in path.read_text()
+
+
+def test_should_report_failure_true_when_never_reported_before() -> None:
+    assert should_report_failure(None, now=datetime(2026, 1, 1, tzinfo=UTC))
+
+
+def test_should_report_failure_false_within_the_cooldown_window() -> None:
+    last = "2026-01-01T00:00:00+00:00"
+    now = datetime(2026, 1, 1, 12, tzinfo=UTC)  # 12 hours later
+
+    assert not should_report_failure(last, now=now, cooldown_hours=24.0)
+
+
+def test_should_report_failure_true_once_the_cooldown_expires() -> None:
+    last = "2026-01-01T00:00:00+00:00"
+    now = datetime(2026, 1, 2, 1, tzinfo=UTC)  # 25 hours later
+
+    assert should_report_failure(last, now=now, cooldown_hours=24.0)
+
+
+def test_should_report_failure_respects_a_custom_cooldown() -> None:
+    last = "2026-01-01T00:00:00+00:00"
+    now = datetime(2026, 1, 1, 2, tzinfo=UTC)  # 2 hours later
+
+    assert should_report_failure(last, now=now, cooldown_hours=1.0)
+    assert not should_report_failure(last, now=now, cooldown_hours=3.0)

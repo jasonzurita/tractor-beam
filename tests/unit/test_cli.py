@@ -129,6 +129,7 @@ def test_send_report_emails_unreported_alerts_and_marks_them_reported(
         max_repro_risk="low",
         returns_accepted=True,
         suggested_offer=None,
+        vision_notes=None,
         alerted_at="2026-07-07T00:00:00Z",
     )
     smtp = FakeSmtp()
