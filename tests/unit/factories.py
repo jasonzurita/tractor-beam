@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from email.message import EmailMessage
 from typing import Any
 
 from sw_sourcing.core.schema import Listing
@@ -79,3 +80,26 @@ class FakeAdapter:
         if self._error is not None:
             raise self._error
         return self._listings
+
+
+class FakeSmtp:
+    """A canned SMTP connection stand-in for EmailSender tests."""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self._error = error
+        self.login_calls: list[tuple[str, str]] = []
+        self.sent_messages: list[EmailMessage] = []
+
+    def __enter__(self) -> FakeSmtp:
+        if self._error is not None:
+            raise self._error
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+    def login(self, username: str, password: str) -> None:
+        self.login_calls.append((username, password))
+
+    def send_message(self, message: EmailMessage) -> None:
+        self.sent_messages.append(message)
