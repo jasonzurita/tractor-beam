@@ -2,6 +2,7 @@ from sw_sourcing.core.decision import DecisionConfig, DecisionInput, decide
 
 CONFIG = DecisionConfig(
     target_per_figure=5.0,
+    target_per_weapon=8.0,
     negotiate_band_pct=0.35,
     max_damage_ratio=0.20,
     confidence_floor=0.5,
@@ -13,6 +14,7 @@ def base_input(**overrides: object) -> DecisionInput:
         "price": 40.0,
         "shipping": 10.0,
         "target_grade_count": 10,
+        "authentic_weapon_count": 0,
         "total_item_count": 10,
         "damaged_or_low_count": 0,
         "confidence": 0.9,
@@ -78,3 +80,108 @@ def test_damage_ratio_over_threshold_is_skip() -> None:
 def test_damage_ratio_exactly_at_threshold_is_not_skip() -> None:
     input_ = base_input(total_item_count=10, damaged_or_low_count=2)  # exactly 20%
     assert decide(input_, CONFIG) == "buy"
+
+
+def test_zero_figures_and_zero_weapons_is_skip_not_a_crash() -> None:
+    input_ = base_input(target_grade_count=0, authentic_weapon_count=0)
+    assert decide(input_, CONFIG) == "skip"
+
+
+def test_weapon_credit_turns_an_otherwise_negotiate_price_into_a_buy() -> None:
+    config = DecisionConfig(
+        target_per_figure=5.0,
+        target_per_weapon=20.0,
+        negotiate_band_pct=0.35,
+        max_damage_ratio=0.20,
+        confidence_floor=0.5,
+    )
+    # Without credit: (60 + 10) / 10 = 7.00/figure -- over target, negotiate
+    # range. One $20 authentic weapon credits it to (70 - 20) / 10 = 5.00.
+    input_ = base_input(price=60.0, shipping=10.0, authentic_weapon_count=1)
+    assert decide(input_, config) == "buy"
+
+
+def test_weapon_credit_can_turn_a_skip_into_a_negotiate() -> None:
+    config = DecisionConfig(
+        target_per_figure=5.0,
+        target_per_weapon=40.0,
+        negotiate_band_pct=0.35,
+        max_damage_ratio=0.20,
+        confidence_floor=0.5,
+    )
+    # effective_cost = (97.5 + 10) - 40 = 67.5 == ceiling (5 * 10 * 1.35) exactly
+    input_ = base_input(price=97.5, shipping=10.0, authentic_weapon_count=1)
+    assert decide(input_, config) == "negotiate"
+
+
+def test_weapon_only_lot_at_target_is_buy() -> None:
+    config = DecisionConfig(
+        target_per_figure=5.0,
+        target_per_weapon=5.0,
+        negotiate_band_pct=0.35,
+        max_damage_ratio=0.20,
+        confidence_floor=0.5,
+    )
+    # cost_per_weapon = 10 / 2 = 5.00 == target exactly
+    input_ = base_input(
+        target_grade_count=0, authentic_weapon_count=2, price=10.0, shipping=0.0
+    )
+    assert decide(input_, config) == "buy"
+
+
+def test_weapon_only_lot_within_band_is_negotiate() -> None:
+    config = DecisionConfig(
+        target_per_figure=5.0,
+        target_per_weapon=5.0,
+        negotiate_band_pct=0.35,
+        max_damage_ratio=0.20,
+        confidence_floor=0.5,
+    )
+    # ceiling = 5 * 2 * 1.35 = 13.5 == total cost exactly
+    input_ = base_input(
+        target_grade_count=0, authentic_weapon_count=2, price=13.5, shipping=0.0
+    )
+    assert decide(input_, config) == "negotiate"
+
+
+def test_weapon_only_lot_over_band_is_skip() -> None:
+    config = DecisionConfig(
+        target_per_figure=5.0,
+        target_per_weapon=5.0,
+        negotiate_band_pct=0.35,
+        max_damage_ratio=0.20,
+        confidence_floor=0.5,
+    )
+    input_ = base_input(
+        target_grade_count=0, authentic_weapon_count=2, price=100.0, shipping=0.0
+    )
+    assert decide(input_, config) == "skip"
+
+
+def test_weapon_only_negotiate_never_applies_to_auctions() -> None:
+    config = DecisionConfig(
+        target_per_figure=5.0,
+        target_per_weapon=5.0,
+        negotiate_band_pct=0.35,
+        max_damage_ratio=0.20,
+        confidence_floor=0.5,
+    )
+    input_ = base_input(
+        target_grade_count=0,
+        authentic_weapon_count=2,
+        price=13.5,
+        shipping=0.0,
+        buying_option="auction",
+    )
+    assert decide(input_, config) == "skip"
+
+
+def test_weapon_only_authenticity_gate_still_applies() -> None:
+    input_ = base_input(
+        target_grade_count=0,
+        authentic_weapon_count=2,
+        price=10.0,
+        shipping=0.0,
+        authenticity_clear=False,
+    )
+    assert decide(input_, CONFIG) == "review"

@@ -21,6 +21,7 @@ class DecisionInput:
     price: float
     shipping: float
     target_grade_count: int
+    authentic_weapon_count: int
     total_item_count: int
     damaged_or_low_count: int
     confidence: float
@@ -32,6 +33,7 @@ class DecisionInput:
 @dataclass(frozen=True)
 class DecisionConfig:
     target_per_figure: float
+    target_per_weapon: float
     negotiate_band_pct: float
     max_damage_ratio: float
     confidence_floor: float
@@ -49,25 +51,50 @@ def decide(input: DecisionInput, config: DecisionConfig) -> Outcome:
         if damage_ratio > config.max_damage_ratio:
             return "skip"
 
-    if input.target_grade_count == 0:
+    total_cost = input.price + input.shipping
+
+    if input.target_grade_count > 0:
+        # Authentic weapons/accessories credit toward the figures'
+        # effective cost -- a good weapon makes the rest of the lot
+        # cheaper, the same way a buyer would value a mixed lot.
+        weapon_credit = input.authentic_weapon_count * config.target_per_weapon
+        effective_cost = max(0.0, total_cost - weapon_credit)
+        cost_per_figure = effective_cost / input.target_grade_count
+
+        if cost_per_figure <= config.target_per_figure:
+            return "buy"
+
+        ceiling = negotiate_ceiling(
+            target_per_figure=config.target_per_figure,
+            target_grade_count=input.target_grade_count,
+            negotiate_band_pct=config.negotiate_band_pct,
+        )
+        if (
+            effective_cost <= ceiling
+            and input.offers_accepted
+            and input.buying_option != "auction"
+        ):
+            return "negotiate"
         return "skip"
 
-    total_cost = input.price + input.shipping
-    cost_per_figure = total_cost / input.target_grade_count
+    if input.authentic_weapon_count > 0:
+        # No qualifying figures -- evaluate as a standalone weapon/
+        # accessory lot instead of an automatic skip.
+        cost_per_weapon = total_cost / input.authentic_weapon_count
+        if cost_per_weapon <= config.target_per_weapon:
+            return "buy"
 
-    if cost_per_figure <= config.target_per_figure:
-        return "buy"
-
-    ceiling = negotiate_ceiling(
-        target_per_figure=config.target_per_figure,
-        target_grade_count=input.target_grade_count,
-        negotiate_band_pct=config.negotiate_band_pct,
-    )
-    if (
-        total_cost <= ceiling
-        and input.offers_accepted
-        and input.buying_option != "auction"
-    ):
-        return "negotiate"
+        ceiling = negotiate_ceiling(
+            target_per_figure=config.target_per_weapon,
+            target_grade_count=input.authentic_weapon_count,
+            negotiate_band_pct=config.negotiate_band_pct,
+        )
+        if (
+            total_cost <= ceiling
+            and input.offers_accepted
+            and input.buying_option != "auction"
+        ):
+            return "negotiate"
+        return "skip"
 
     return "skip"
