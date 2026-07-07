@@ -13,7 +13,10 @@ from sw_sourcing.storage.db import Database
 
 DEFAULTS: dict[str, Any] = {
     "target_per_figure": 5.00,
-    "target_per_weapon": None,
+    # Placeholder -- no real market comps yet. Weapon pricing is a live
+    # feature (see core/decision.py); tune this once you have a sense of
+    # what vintage weapons/accessories actually sell for.
+    "target_per_weapon": 8.00,
     "grade_floor": "mid",
     "authenticity_required": True,
     "repro_keyword_blocklist": [

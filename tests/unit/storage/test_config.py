@@ -15,6 +15,14 @@ def test_unset_key_returns_documented_default(tmp_path: Path) -> None:
     assert config.get("target_per_figure") == 5.00
 
 
+def test_target_per_weapon_has_a_real_default_not_none(tmp_path: Path) -> None:
+    # A live placeholder, not "TBD" -- weapon pricing is a real feature now,
+    # not a config value that silently no-ops until someone sets it. Tune
+    # via `cli.py config set target_per_weapon <value>` once you have comps.
+    config = make_config(tmp_path)
+    assert config.get("target_per_weapon") == 8.00
+
+
 def test_set_then_get_round_trips_a_float(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     config.set("target_per_figure", 6.5)
