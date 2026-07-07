@@ -52,14 +52,16 @@ sw_sourcing/
     db.py              # SQLite access
     config.py          # typed config accessor
   alerts/
-    discord.py
+    discord.py         # optional live push
+    email.py           # primary channel: periodic digest, decoupled from scan cadence
   diagnostics.py       # automatic bug reporting (see below) -- not auto-fix
+  lock.py              # non-blocking file lock, prevents overlapping scan runs
   pipeline.py          # orchestrates one run (wires the pieces together)
-  cli.py               # cron entrypoint
+  cli.py               # cron entrypoint: scan / send-report / report-bug / config
 tests/                 # mirrors the package tree
   unit/                # pure-logic tests, no network
   fixtures/            # recorded API/scraper/vision responses
-  integration/         # opt-in, real creds, marked @integration
+  integration/         # opt-in, real creds/live claude CLI, marked @integration
 bug_reports/           # gitignored; written by diagnostics.py, reviewed by hand
 ```
 
@@ -74,7 +76,8 @@ bug_reports/           # gitignored; written by diagnostics.py, reviewed by hand
 | `core/vision.py` | Prompt + parse grade & repro-risk JSON; deterministically recomputes `target_grade_count`/`authentic_weapon_count` from the parsed `items` list | Hardcode a client; caching lives here + storage; **trust the model's own aggregate counts** |
 | `storage/*` | SQLite reads/writes | Contain decision logic |
 | `alerts/*` | Formatting + sending | Decide what qualifies as an alert |
-| `diagnostics.py` | Writing bug reports (context + traceback + repro) for human review | **Auto-fix or self-modify code.** This project deliberately has no autonomous self-healing -- errors are captured for periodic manual review with Claude Code, never acted on unattended |
+| `diagnostics.py` | Writing bug reports (context + traceback + repro) for human review; cooldown-gates repeat reports for the same failure key so a persistently broken source/listing doesn't spam a fresh report every run | **Auto-fix or self-modify code.** This project deliberately has no autonomous self-healing -- errors are captured for periodic manual review with Claude Code, never acted on unattended |
+| `lock.py` | Non-blocking file lock so overlapping `scan` runs skip cleanly instead of racing on the SQLite file | Block/wait for the lock -- a stuck lock must never hang cron |
 | `pipeline.py` | Wiring + orchestration | Reimplement any of the above |
 
 ---
@@ -126,9 +129,19 @@ pytest                      # unit + fixture tests
 pytest -m integration       # opt-in, needs real creds
 
 # run
-python -m sw_sourcing.cli scan            # full scheduled run
-python -m sw_sourcing.cli scan --source ebay   # single source
+python -m sw_sourcing.cli scan                     # full scheduled run
+python -m sw_sourcing.cli scan --source ebay        # single source
+python -m sw_sourcing.cli send-report               # email digest of unreported alerts
+python -m sw_sourcing.cli report-bug "note"         # manually log something odd
+python -m sw_sourcing.cli config list               # print every config key + value
+python -m sw_sourcing.cli config get target_per_figure
+python -m sw_sourcing.cli config set target_per_figure 5.5
 ```
+
+`scan` and `send-report` run on independent cron schedules -- changing either's
+cadence is a one-line crontab edit, not a code change. `scan` takes a
+non-blocking lock (`lock.py`) so an overlapping run skips cleanly rather than
+racing the previous one on the SQLite file.
 
 ---
 
