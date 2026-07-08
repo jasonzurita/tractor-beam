@@ -178,6 +178,7 @@ def test_scan_skips_cleanly_when_a_previous_scan_is_still_running(
     lock_path = tmp_path / "scan.lock"
     monkeypatch.setenv("SW_SOURCING_LOCK_PATH", str(lock_path))
     monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(cli, "wait_for_network", lambda **kwargs: True)
 
     def _boom(*args: object, **kwargs: object) -> None:
         raise AssertionError(
@@ -189,6 +190,48 @@ def test_scan_skips_cleanly_when_a_previous_scan_is_still_running(
     with lock.acquire(lock_path) as acquired:
         assert acquired
         exit_code = main(["scan"])
+
+    assert exit_code == 0
+
+
+def test_scan_skips_cleanly_and_never_takes_the_lock_when_network_is_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "scan.lock"
+    monkeypatch.setenv("SW_SOURCING_LOCK_PATH", str(lock_path))
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(cli, "wait_for_network", lambda **kwargs: False)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("build_adapters should not run without network")
+
+    monkeypatch.setattr(cli, "build_adapters", _boom)
+
+    exit_code = main(["scan"])
+
+    assert exit_code == 0
+    # A scan that never even reached the lock shouldn't leave a stale lock
+    # file mid-acquisition -- the lock is only ever touched after the
+    # network check passes.
+    with lock.acquire(lock_path) as acquired:
+        assert acquired
+
+
+def test_send_report_skips_cleanly_when_network_is_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SW_SOURCING_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("REPORT_TO_EMAIL", "jasonzurita@me.com")
+    monkeypatch.setenv("SMTP_USERNAME", "jzuri1@gmail.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+    monkeypatch.setattr(cli, "wait_for_network", lambda **kwargs: False)
+
+    def _boom(*args: object, **kwargs: object) -> int:
+        raise AssertionError("send_report should not run without network")
+
+    monkeypatch.setattr(cli, "send_report", _boom)
+
+    exit_code = main(["send-report"])
 
     assert exit_code == 0
 

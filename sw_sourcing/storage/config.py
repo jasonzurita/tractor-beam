@@ -45,6 +45,13 @@ DEFAULTS: dict[str, Any] = {
     # page indefinitely looking for fresh ones that don't exist.
     "vision_analysis_budget_per_run": 50,
     "max_fetch_pages_per_source": 5,
+    # Preflight retry (sw_sourcing/network.py) before `scan`/`send-report`
+    # touch the network -- rides out the brief DNS/connectivity gap right
+    # after waking from sleep instead of failing on the first raw error.
+    # Defaults: 1s, 2s, 4s, 8s, 16s between attempts (~31s total).
+    "network_check_max_attempts": 5,
+    "network_check_initial_delay_seconds": 1.0,
+    "network_check_max_delay_seconds": 16.0,
 }
 
 

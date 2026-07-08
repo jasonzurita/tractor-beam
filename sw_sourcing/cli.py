@@ -26,6 +26,7 @@ from sw_sourcing.core.dedupe import Dedupe
 from sw_sourcing.core.vision import ClaudeCliVisionClient, Vision
 from sw_sourcing.dashboard import build_dashboard_data, render_dashboard_html
 from sw_sourcing.diagnostics import DEFAULT_REPORTS_DIR, write_report
+from sw_sourcing.network import wait_for_network
 from sw_sourcing.pipeline import Pipeline
 from sw_sourcing.storage.config import DEFAULTS as CONFIG_DEFAULTS
 from sw_sourcing.storage.config import Config
@@ -155,6 +156,24 @@ def send_report(
     return len(unreported)
 
 
+def _network_ready(config: Config, *, command: str) -> bool:
+    """Preflight retry (see `network.py`) before a network-dependent
+    command does real work -- not a bug, so no bug report; just a clear log
+    line and a clean skip, same as the "another scan is already running"
+    skip below.
+    """
+    ready = wait_for_network(
+        max_attempts=config.get("network_check_max_attempts"),
+        initial_delay_seconds=config.get("network_check_initial_delay_seconds"),
+        max_delay_seconds=config.get("network_check_max_delay_seconds"),
+    )
+    if not ready:
+        logger.warning(
+            "No network reachable after retrying; skipping this %s run", command
+        )
+    return ready
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     configure_logging()
@@ -256,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "send-report":
+        if not _network_ready(Config(db), command="send-report"):
+            return 0
         try:
             count = send_report(
                 db,
@@ -277,13 +298,16 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Report: %s alert(s) sent", count)
         return 0
 
+    config = Config(db)
+    if not _network_ready(config, command="scan"):
+        return 0
+
     lock_path = os.environ.get(_LOCK_PATH_ENV, _DEFAULT_LOCK_PATH)
     with lock.acquire(lock_path) as acquired:
         if not acquired:
             logger.info("Another scan is already running; skipping this run.")
             return 0
 
-        config = Config(db)
         discord_webhook = os.environ.get("DISCORD_WEBHOOK_URL")
 
         try:
