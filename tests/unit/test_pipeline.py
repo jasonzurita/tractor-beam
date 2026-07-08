@@ -96,6 +96,33 @@ def test_run_works_without_discord_configured_and_still_persists_alerts(
     assert unreported[0].url == str(listing.url)
 
 
+def test_run_records_a_completed_run_with_started_and_finished_timestamps(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "test.db")
+    config = Config(db)
+    dedupe = Dedupe(db)
+    vision = Vision(FakeVisionClient(BUY_RESULT), db)
+    listing = make_listing(listing_id="buy-1", price=10.0, shipping=0.0)
+    pipeline = Pipeline(
+        adapters={"ebay": FakeAdapter([listing])},
+        bug_reports_dir=tmp_path / "bug_reports",
+        dedupe=dedupe,
+        vision=vision,
+        config=config,
+        db=db,
+        alerts=None,
+    )
+
+    pipeline.run()
+
+    runs = db.get_recent_runs(limit=1)
+    assert len(runs) == 1
+    assert runs[0].started_at is not None
+    assert runs[0].finished_at is not None
+    assert runs[0].sources_ok == ["ebay"]
+
+
 def test_run_sends_a_buy_alert_for_a_qualifying_listing(tmp_path: Path) -> None:
     listing = make_listing(listing_id="buy-1", price=10.0, shipping=0.0)
     pipeline, _, discord_client, _ = make_pipeline(

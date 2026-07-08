@@ -244,10 +244,34 @@ def test_marking_reported_does_not_affect_other_alerts(tmp_path: Path) -> None:
     assert remaining[0].listing_id == "2"
 
 
-def test_record_run_does_not_raise(tmp_path: Path) -> None:
+def record_finished_run(
+    db: Database,
+    *,
+    started_at: str,
+    finished_at: str,
+    sources_ok: list[str],
+    sources_failed: list[str],
+    listings_seen: int,
+    alerts_sent: int,
+) -> int:
+    run_id = db.record_run_started(started_at=started_at)
+    db.record_run_finished(
+        run_id=run_id,
+        finished_at=finished_at,
+        sources_ok=sources_ok,
+        sources_failed=sources_failed,
+        listings_seen=listings_seen,
+        alerts_sent=alerts_sent,
+    )
+    return run_id
+
+
+def test_record_run_started_and_finished_does_not_raise(tmp_path: Path) -> None:
     db = make_db(tmp_path)
-    db.record_run(
+    record_finished_run(
+        db,
         started_at="2026-07-06T00:00:00Z",
+        finished_at="2026-07-06T00:01:00Z",
         sources_ok=["ebay"],
         sources_failed=["mercari"],
         listings_seen=5,
@@ -255,17 +279,29 @@ def test_record_run_does_not_raise(tmp_path: Path) -> None:
     )
 
 
+def test_record_run_started_returns_an_id_finish_can_target(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    first_id = db.record_run_started(started_at="2026-07-06T00:00:00Z")
+    second_id = db.record_run_started(started_at="2026-07-06T00:05:00Z")
+
+    assert first_id != second_id
+
+
 def test_get_recent_runs_returns_most_recent_first(tmp_path: Path) -> None:
     db = make_db(tmp_path)
-    db.record_run(
+    record_finished_run(
+        db,
         started_at="2026-07-06T00:00:00Z",
+        finished_at="2026-07-06T00:01:00Z",
         sources_ok=["ebay"],
         sources_failed=[],
         listings_seen=5,
         alerts_sent=1,
     )
-    db.record_run(
+    record_finished_run(
+        db,
         started_at="2026-07-07T00:00:00Z",
+        finished_at="2026-07-07T00:02:00Z",
         sources_ok=["ebay"],
         sources_failed=["facebook"],
         listings_seen=8,
@@ -278,17 +314,36 @@ def test_get_recent_runs_returns_most_recent_first(tmp_path: Path) -> None:
         "2026-07-07T00:00:00Z",
         "2026-07-06T00:00:00Z",
     ]
+    assert runs[0].finished_at == "2026-07-07T00:02:00Z"
     assert runs[0].sources_ok == ["ebay"]
     assert runs[0].sources_failed == ["facebook"]
     assert runs[0].listings_seen == 8
     assert runs[0].alerts_sent == 2
 
 
+def test_get_recent_runs_shows_null_finished_at_for_a_run_in_progress(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    db.record_run_started(started_at="2026-07-07T00:00:00Z")
+
+    runs = db.get_recent_runs(limit=10)
+
+    assert len(runs) == 1
+    assert runs[0].finished_at is None
+    assert runs[0].sources_ok == []
+    assert runs[0].sources_failed == []
+    assert runs[0].listings_seen is None
+    assert runs[0].alerts_sent is None
+
+
 def test_get_recent_runs_respects_limit(tmp_path: Path) -> None:
     db = make_db(tmp_path)
     for i in range(5):
-        db.record_run(
+        record_finished_run(
+            db,
             started_at=f"2026-07-0{i + 1}T00:00:00Z",
+            finished_at=f"2026-07-0{i + 1}T00:01:00Z",
             sources_ok=["ebay"],
             sources_failed=[],
             listings_seen=1,
@@ -307,15 +362,19 @@ def test_get_recent_runs_returns_empty_list_when_no_runs_recorded(
 
 def test_get_run_totals_sums_across_all_runs(tmp_path: Path) -> None:
     db = make_db(tmp_path)
-    db.record_run(
+    record_finished_run(
+        db,
         started_at="2026-07-06T00:00:00Z",
+        finished_at="2026-07-06T00:01:00Z",
         sources_ok=["ebay"],
         sources_failed=[],
         listings_seen=5,
         alerts_sent=1,
     )
-    db.record_run(
+    record_finished_run(
+        db,
         started_at="2026-07-07T00:00:00Z",
+        finished_at="2026-07-07T00:02:00Z",
         sources_ok=["ebay"],
         sources_failed=["facebook"],
         listings_seen=8,
@@ -327,6 +386,26 @@ def test_get_run_totals_sums_across_all_runs(tmp_path: Path) -> None:
     assert totals.total_runs == 2
     assert totals.total_listings_seen == 13
     assert totals.total_alerts_sent == 3
+
+
+def test_get_run_totals_ignores_a_run_still_in_progress(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_finished_run(
+        db,
+        started_at="2026-07-06T00:00:00Z",
+        finished_at="2026-07-06T00:01:00Z",
+        sources_ok=["ebay"],
+        sources_failed=[],
+        listings_seen=5,
+        alerts_sent=1,
+    )
+    db.record_run_started(started_at="2026-07-07T00:00:00Z")
+
+    totals = db.get_run_totals()
+
+    assert totals.total_runs == 2
+    assert totals.total_listings_seen == 5
+    assert totals.total_alerts_sent == 1
 
 
 def test_get_run_totals_is_all_zero_when_no_runs_recorded(tmp_path: Path) -> None:

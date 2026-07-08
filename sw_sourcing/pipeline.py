@@ -69,6 +69,7 @@ class Pipeline:
     def run(self) -> RunSummary:
         summary = RunSummary()
         started_at = datetime.now(UTC).isoformat()
+        run_id = self._db.record_run_started(started_at=started_at)
 
         for source, adapter in self._adapters.items():
             try:
@@ -107,8 +108,9 @@ class Pipeline:
                         run_summary=summary,
                     )
 
-        self._db.record_run(
-            started_at=started_at,
+        self._db.record_run_finished(
+            run_id=run_id,
+            finished_at=datetime.now(UTC).isoformat(),
             sources_ok=summary.sources_ok,
             sources_failed=summary.sources_failed,
             listings_seen=summary.listings_seen,

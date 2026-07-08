@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS config (
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY,
     started_at TEXT NOT NULL,
+    finished_at TEXT,
     sources_ok TEXT,
     sources_failed TEXT,
     listings_seen INTEGER,
@@ -66,6 +67,10 @@ _ALERT_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
     ("vision_notes", "ALTER TABLE alerts ADD COLUMN vision_notes TEXT"),
     ("price", "ALTER TABLE alerts ADD COLUMN price REAL"),
     ("cost_per_weapon", "ALTER TABLE alerts ADD COLUMN cost_per_weapon REAL"),
+]
+
+_RUN_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
+    ("finished_at", "ALTER TABLE runs ADD COLUMN finished_at TEXT"),
 ]
 
 
@@ -101,10 +106,11 @@ _ALERT_COLUMNS = (
 class RunRecord:
     id: int
     started_at: str
+    finished_at: str | None
     sources_ok: list[str]
     sources_failed: list[str]
-    listings_seen: int
-    alerts_sent: int
+    listings_seen: int | None
+    alerts_sent: int | None
 
 
 @dataclass(frozen=True)
@@ -118,10 +124,11 @@ def _row_to_run_record(row: tuple[object, ...]) -> RunRecord:
     return RunRecord(
         id=row[0],  # type: ignore[arg-type]
         started_at=row[1],  # type: ignore[arg-type]
-        sources_ok=json.loads(row[2]) if row[2] else [],  # type: ignore[arg-type]
-        sources_failed=json.loads(row[3]) if row[3] else [],  # type: ignore[arg-type]
-        listings_seen=row[4],  # type: ignore[arg-type]
-        alerts_sent=row[5],  # type: ignore[arg-type]
+        finished_at=row[2],  # type: ignore[arg-type]
+        sources_ok=json.loads(row[3]) if row[3] else [],  # type: ignore[arg-type]
+        sources_failed=json.loads(row[4]) if row[4] else [],  # type: ignore[arg-type]
+        listings_seen=row[5],  # type: ignore[arg-type]
+        alerts_sent=row[6],  # type: ignore[arg-type]
     )
 
 
@@ -157,9 +164,18 @@ class Database:
             self._migrate(conn)
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(alerts)")}
+        existing_alert_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(alerts)")
+        }
         for column, ddl in _ALERT_COLUMN_MIGRATIONS:
-            if column not in existing_columns:
+            if column not in existing_alert_columns:
+                conn.execute(ddl)
+
+        existing_run_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(runs)")
+        }
+        for column, ddl in _RUN_COLUMN_MIGRATIONS:
+            if column not in existing_run_columns:
                 conn.execute(ddl)
 
     @contextmanager
@@ -307,10 +323,25 @@ class Database:
                 (key, reported_at),
             )
 
-    def record_run(
+    def record_run_started(self, *, started_at: str) -> int:
+        """Inserts a run row with no completion data yet and returns its id.
+
+        `finished_at` stays NULL until `record_run_finished` is called. If
+        the process dies before that (crash, kill -9) the row is left with
+        `finished_at` NULL forever -- that's the signal the dashboard uses
+        to distinguish "still running" from "started and never finished."
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO runs (started_at) VALUES (?)", (started_at,)
+            )
+            return int(cursor.lastrowid)  # type: ignore[arg-type]
+
+    def record_run_finished(
         self,
         *,
-        started_at: str,
+        run_id: int,
+        finished_at: str,
         sources_ok: list[str],
         sources_failed: list[str],
         listings_seen: int,
@@ -319,16 +350,18 @@ class Database:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO runs (
-                    started_at, sources_ok, sources_failed, listings_seen, alerts_sent
-                ) VALUES (?, ?, ?, ?, ?)
+                UPDATE runs
+                SET finished_at = ?, sources_ok = ?, sources_failed = ?,
+                    listings_seen = ?, alerts_sent = ?
+                WHERE id = ?
                 """,
                 (
-                    started_at,
+                    finished_at,
                     json.dumps(sources_ok),
                     json.dumps(sources_failed),
                     listings_seen,
                     alerts_sent,
+                    run_id,
                 ),
             )
 
@@ -336,7 +369,7 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, started_at, sources_ok, sources_failed,
+                SELECT id, started_at, finished_at, sources_ok, sources_failed,
                        listings_seen, alerts_sent
                 FROM runs
                 ORDER BY id DESC
