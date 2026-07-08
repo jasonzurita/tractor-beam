@@ -25,6 +25,14 @@ _BUYING_OPTION_MAP: dict[str, BuyingOption] = {
 
 _TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 
+# Calculated-shipping listings often omit shippingCost entirely from the
+# summary API (the real cost depends on buyer location), which is not the
+# same as free shipping -- defaulting an undetermined cost to $0 would
+# systematically underprice those listings, so it assumes this flat
+# fallback instead. $0 is only ever used when eBay explicitly reports a
+# shippingCost value (including a genuine "0.00" for free shipping).
+_UNKNOWN_SHIPPING_FALLBACK = 5.00
+
 
 def get_ebay_access_token(
     app_id: str, cert_id: str, *, client: httpx.Client | None = None
@@ -62,7 +70,11 @@ def _buying_option(options: list[str]) -> BuyingOption:
 def normalize_item(item: dict[str, Any], *, fetched_at: datetime) -> Listing:
     """Map one eBay Browse API item_summary to a `Listing`."""
     shipping_options = item.get("shippingOptions") or [{}]
-    shipping_cost = shipping_options[0].get("shippingCost", {}).get("value", "0")
+    shipping_cost_field = shipping_options[0].get("shippingCost")
+    if shipping_cost_field is not None and "value" in shipping_cost_field:
+        shipping_cost = float(shipping_cost_field["value"])
+    else:
+        shipping_cost = _UNKNOWN_SHIPPING_FALLBACK
 
     images = [item["image"]["imageUrl"]] if item.get("image") else []
     images += [img["imageUrl"] for img in item.get("additionalImages", [])]
@@ -83,7 +95,7 @@ def normalize_item(item: dict[str, Any], *, fetched_at: datetime) -> Listing:
         title=item["title"],
         description=item.get("shortDescription", ""),
         price=float(item["price"]["value"]),
-        shipping=float(shipping_cost),
+        shipping=shipping_cost,
         buying_option=_buying_option(buying_options),
         offers_accepted="BEST_OFFER" in buying_options,
         returns_accepted=bool(

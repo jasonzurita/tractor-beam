@@ -1,6 +1,8 @@
 import base64
+import copy
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -11,6 +13,12 @@ FIXTURE = json.loads(
         Path(__file__).parents[2] / "fixtures" / "ebay_item_summary_search.json"
     ).read_text()
 )
+
+
+def make_item(**overrides: Any) -> dict[str, Any]:
+    item = copy.deepcopy(FIXTURE["itemSummaries"][0])
+    item.update(overrides)
+    return item
 
 
 def test_normalize_item_maps_core_fields() -> None:
@@ -47,6 +55,35 @@ def test_normalize_item_maps_auction_only_listing() -> None:
     assert listing.buying_option == "auction"
     assert listing.offers_accepted is False
     assert listing.returns_accepted is False
+
+
+def test_normalize_item_falls_back_to_5_dollars_when_shipping_cost_is_absent() -> None:
+    """Calculated-shipping listings often omit shippingCost entirely in the
+    summary API (the real cost depends on buyer location) -- defaulting
+    that to $0 would systematically underprice them, so an undetermined
+    cost assumes a conservative flat $5 instead."""
+    item = make_item(shippingOptions=[{}])
+    listing = normalize_item(item, fetched_at="2026-07-06T00:00:00Z")
+
+    assert listing.shipping == 5.00
+
+
+def test_normalize_item_falls_back_to_5_dollars_when_no_shipping_options() -> None:
+    item = make_item(shippingOptions=[])
+    listing = normalize_item(item, fetched_at="2026-07-06T00:00:00Z")
+
+    assert listing.shipping == 5.00
+
+
+def test_normalize_item_uses_zero_only_when_shipping_cost_is_explicitly_present() -> (
+    None
+):
+    item = make_item(
+        shippingOptions=[{"shippingCost": {"value": "0.0", "currency": "USD"}}]
+    )
+    listing = normalize_item(item, fetched_at="2026-07-06T00:00:00Z")
+
+    assert listing.shipping == 0.0
 
 
 def test_fetch_normalizes_every_item_in_the_search_response() -> None:

@@ -50,6 +50,8 @@ class VisionItem(BaseModel):
     repro_notes: str | None = None
     rare_candidate: bool = False
     rarity_notes: str | None = None
+    era_mismatch: bool = False
+    era_notes: str | None = None
 
 
 class VisionResult(BaseModel):
@@ -58,7 +60,8 @@ class VisionResult(BaseModel):
     notes: str = ""
 
     def target_grade_count(self, *, grade_floor: Grade = "mid") -> int:
-        """Figures at or above `grade_floor`, undamaged, and repro_risk low.
+        """Figures at or above `grade_floor`, undamaged, repro_risk low, and
+        from the original vintage era (not a later reissue/homage line).
 
         `grade_floor` is config-driven (see storage/config.py), never
         hardcoded here -- CLAUDE.md locks it as a business rule.
@@ -71,15 +74,19 @@ class VisionResult(BaseModel):
             and item.grade not in ("damaged", "uncertain")
             and _GRADE_ORDER[item.grade] >= floor_rank
             and item.repro_risk == "low"
+            and not item.era_mismatch
         )
 
     @property
     def authentic_weapon_count(self) -> int:
-        """Weapons/accessories with repro_risk low (grade is not a gate here)."""
+        """Weapons/accessories with repro_risk low and no era mismatch
+        (grade is not a gate here)."""
         return sum(
             1
             for item in self.items
-            if item.type in ("weapon", "accessory") and item.repro_risk == "low"
+            if item.type in ("weapon", "accessory")
+            and item.repro_risk == "low"
+            and not item.era_mismatch
         )
 
     @property
@@ -188,9 +195,15 @@ Read every image at these exact local paths, in order:
 
 For each item visible across the photos, grade it and flag reproduction \
 risk:
-- grade: "high" (sharp, minimal wear), "mid" (clean, minor wear), "low" \
-(heavy wear/fading), "damaged" (missing/broken piece), or "uncertain" \
-(photo insufficient to grade).
+- grade: "high" (sharp, minimal wear -- no visible scuffs, scratches, or \
+paint loss), "mid" (clean, only genuinely minor wear, e.g. slight \
+overall fading with no distinct scuffs/scratches/paint loss), "low" \
+("beater" -- heavy wear/fading, OR any visible scuffs, scratches, \
+marks, or noticeable/distinct paint loss/chipping, even if every piece \
+is present and nothing is broken), "damaged" (missing or broken piece), \
+or "uncertain" (photo insufficient to grade). Visible scuffs, marks, or \
+noticeable missing/worn paint are beater-grade wear, not "minor" -- do \
+not grade a piece "mid" just because it has no missing or broken parts.
 - repro_risk: "low", "elevated", or "high" — bias to caution; any \
 uncertainty about a weapon or accessory's authenticity is at least \
 "elevated".
@@ -206,6 +219,19 @@ flagging something as a possible rare variant should make you MORE \
 cautious about authenticity, never less -- do not lower repro_risk just \
 because a piece looks exciting or valuable.
 
+For each item, also judge whether it is actually from the ORIGINAL \
+vintage Kenner Star Wars line (1977-1985), as opposed to a later \
+reissue, homage, or relaunch line that only resembles or references the \
+original (e.g. Kenner/Hasbro "Power of the Force" 1995-2000s POTF2, \
+Hasbro's "The Vintage Collection" modern MOC figures, or any other \
+current-retail or reissue product). Listing titles often say "vintage" \
+regardless of actual era -- judge from the item itself (packaging style, \
+character/branding, card back, copyright date if visible), not the \
+title. If it is NOT from the original 1977-1985 line, set \
+"era_mismatch": true and explain in "era_notes"; this applies even if \
+the piece is a genuine, authentic, unaltered example of its own (later) \
+production run.
+
 Return ONLY strict JSON (no markdown fences, no commentary) matching this \
 exact shape:
 {{
@@ -213,7 +239,8 @@ exact shape:
     {{"id": 1, "type": "figure|weapon|accessory", "grade": "...", \
 "issues": ["..."], "repro_risk": "...", "confidence": 0.0, \
 "repro_notes": "optional string", "rare_candidate": false, \
-"rarity_notes": "optional string"}}
+"rarity_notes": "optional string", "era_mismatch": false, \
+"era_notes": "optional string"}}
   ],
   "photo_quality": "clear|unclear",
   "notes": "short free-text notes"

@@ -74,7 +74,7 @@ bug_reports/           # gitignored; written by diagnostics.py, reviewed by hand
 | `core/decision.py` | Buy/negotiate/review/skip classification | Do I/O, know about a source |
 | `core/negotiation.py` | Offer + cutoff math | Do I/O |
 | `core/authenticity.py` | Repro-text screen + risk routing | Certify authenticity (only flags risk) |
-| `core/vision.py` | Prompt + parse grade & repro-risk JSON; deterministically recomputes `target_grade_count`/`authentic_weapon_count` from the parsed `items` list | Hardcode a client; caching lives here + storage; **trust the model's own aggregate counts** |
+| `core/vision.py` | Prompt + parse grade, repro-risk, and era-mismatch JSON; deterministically recomputes `target_grade_count`/`authentic_weapon_count` from the parsed `items` list (excluding era-mismatched items) | Hardcode a client; caching lives here + storage; **trust the model's own aggregate counts** |
 | `storage/*` | SQLite reads/writes | Contain decision logic |
 | `alerts/*` | Formatting + sending | Decide what qualifies as an alert |
 | `diagnostics.py` | Writing bug reports (context + traceback + repro) for human review; cooldown-gates repeat reports for the same failure key so a persistently broken source/listing doesn't spam a fresh report every run | **Auto-fix or self-modify code.** This project deliberately has no autonomous self-healing -- errors are captured for periodic manual review with Claude Code, never acted on unattended |
@@ -155,8 +155,10 @@ racing the previous one on the SQLite file.
 
 Changing any of these requires an updated test **and** a config default change — never a bare edit:
 
-- `target_per_figure` (default 5.00), computed against **mid+ grade, undamaged, `repro_risk: low`** figures only.
-- `grade_floor` = "mid" — the vision gate grades; low-grade and damaged figures do not count.
+- `target_per_figure` (default 5.00), computed against **mid+ grade, undamaged, `repro_risk: low`, era-correct** figures only.
+- `grade_floor` = "mid" — the vision gate grades; low-grade and damaged figures do not count. "mid" requires genuinely minor wear only -- visible scuffs, scratches, marks, or noticeable/distinct paint loss are beater-grade ("low") regardless of whether every piece is present and unbroken.
+- **Shipping fallback.** `adapters/ebay.py` assumes a flat $5 shipping cost when the source doesn't report a determinable `shippingCost` (e.g. calculated-shipping listings, whose real cost depends on buyer location) -- never $0. $0 is only used when the source explicitly reports a shipping cost of zero (genuine free shipping).
+- **Era screening.** `target_grade_count`/`authentic_weapon_count` exclude any item the vision gate flags `era_mismatch: true` -- a later reissue/homage line (e.g. Hasbro's "The Vintage Collection", 1995-2000s POTF2) that only resembles the original 1977-1985 Kenner line, even if it's a genuine, unaltered example of its own (later) production run. Unlike a repro-risk or rare-candidate flag, this is never ambiguous enough to warrant manual review -- it's excluded from counts the same as a repro-risky item, which naturally routes a listing with no qualifying items to skip. Listing titles saying "vintage" are not evidence; the vision gate judges the item itself.
 - **Weapons and accessories are wanted** (`target_per_weapon`, default 8.00 -- a placeholder, no real comps yet) — credited toward a figure lot's effective cost, or priced standalone for a weapon-only lot — but subject to the same authenticity gate as everything else.
 - **Authenticity is mandatory and overrides price.** `max_repro_risk_for_autobuy` = "low"; anything above routes to manual review. A `rare_candidate` item (see `core/vision.py`) always routes to manual review too, regardless of its own repro-risk score -- rarity is never a discount on scrutiny. Disclosed-repro listings (keyword blocklist) are skipped. This rule may not be relaxed for a cheaper price.
 - `negotiate_band_pct` (default 0.35); negotiate alerts only on offer-accepting, haggle-friendly sources — never live auctions.

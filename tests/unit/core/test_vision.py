@@ -117,6 +117,68 @@ def test_authentic_weapon_count_ignores_grade_and_only_gates_on_repro_risk(
     assert result.authentic_weapon_count == 1  # only item 4; item 3 is elevated risk
 
 
+def test_target_grade_count_excludes_an_era_mismatched_figure(tmp_path: Path) -> None:
+    era_mismatch_result = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "figure",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                    "era_mismatch": True,
+                    "era_notes": "2022 Hasbro Vintage Collection, not 1977-1985.",
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    vision, _ = make_vision(tmp_path, response=era_mismatch_result)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+    assert result.target_grade_count() == 0
+
+
+def test_authentic_weapon_count_excludes_an_era_mismatched_weapon(
+    tmp_path: Path,
+) -> None:
+    era_mismatch_result = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "weapon",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                    "era_mismatch": True,
+                    "era_notes": "Modern reissue weapon, not original vintage tooling.",
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    vision, _ = make_vision(tmp_path, response=era_mismatch_result)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+    assert result.authentic_weapon_count == 0
+
+
+def test_era_mismatch_defaults_to_false(tmp_path: Path) -> None:
+    vision, _ = make_vision(tmp_path)
+    result = vision.grade(
+        images=["a"], title="t", description="d", graded_at="2026-07-06T00:00:00Z"
+    )
+    assert not any(item.era_mismatch for item in result.items)
+
+
 def test_max_repro_risk_is_the_highest_across_items(tmp_path: Path) -> None:
     vision, _ = make_vision(tmp_path)
     result = vision.grade(
@@ -316,6 +378,19 @@ def test_build_prompt_asks_about_rare_variants_and_extra_repro_caution() -> None
     prompt = build_prompt(title="t", description="d", image_paths=[])
     assert "rare" in prompt.lower()
     assert "counterfeit" in prompt.lower() or "reproduc" in prompt.lower()
+
+
+def test_build_prompt_asks_to_screen_for_non_vintage_era_items() -> None:
+    prompt = build_prompt(title="t", description="d", image_paths=[])
+    assert "era_mismatch" in prompt
+    assert "1977" in prompt and "1985" in prompt
+
+
+def test_build_prompt_treats_scuffs_marks_and_paint_loss_as_beater_grade() -> None:
+    prompt = build_prompt(title="t", description="d", image_paths=[])
+    assert "scuff" in prompt.lower()
+    assert "paint" in prompt.lower()
+    assert "beater" in prompt.lower()
 
 
 def test_extract_json_passes_through_plain_json() -> None:
