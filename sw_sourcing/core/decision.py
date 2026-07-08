@@ -40,12 +40,23 @@ class DecisionConfig:
 
 
 def decide(input: DecisionInput, config: DecisionConfig) -> Outcome:
-    if not input.authenticity_clear:
+    """An authenticity/confidence flag only ever *demotes* a buy or negotiate
+    down to review -- it never promotes a listing that price/condition alone
+    would already skip. A junk-priced or heavily-damaged lot is a skip
+    whether or not it's also authenticity-flagged; reviewing it manually
+    would never lead anywhere, so it isn't worth the alert.
+    """
+    price_outcome = _decide_on_price(input, config)
+    if price_outcome == "skip":
+        return "skip"
+
+    if not input.authenticity_clear or input.confidence < config.confidence_floor:
         return "review"
 
-    if input.confidence < config.confidence_floor:
-        return "review"
+    return price_outcome
 
+
+def _decide_on_price(input: DecisionInput, config: DecisionConfig) -> Outcome:
     if input.total_item_count > 0:
         damage_ratio = input.damaged_or_low_count / input.total_item_count
         if damage_ratio > config.max_damage_ratio:

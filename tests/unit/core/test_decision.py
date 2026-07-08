@@ -185,3 +185,47 @@ def test_weapon_only_authenticity_gate_still_applies() -> None:
         authenticity_clear=False,
     )
     assert decide(input_, CONFIG) == "review"
+
+
+def test_authenticity_not_clear_but_over_band_price_is_skip_not_review() -> None:
+    # Price alone would already skip (110 > ceiling 67.5) -- authenticity
+    # doubt on a listing you'd never buy anyway isn't worth a review alert.
+    input_ = base_input(price=100.0, shipping=10.0, authenticity_clear=False)
+    assert decide(input_, CONFIG) == "skip"
+
+
+def test_authenticity_not_clear_and_within_negotiate_band_is_review() -> None:
+    # Price alone would negotiate (67.5 == ceiling exactly) -- a real
+    # opportunity pending authenticity, so it's still worth a look.
+    input_ = base_input(price=57.5, shipping=10.0, authenticity_clear=False)
+    assert decide(input_, CONFIG) == "review"
+
+
+def test_low_confidence_but_over_band_price_is_skip_not_review() -> None:
+    input_ = base_input(price=100.0, shipping=10.0, confidence=0.4)
+    assert decide(input_, CONFIG) == "skip"
+
+
+def test_authenticity_not_clear_and_damage_ratio_over_threshold_is_skip() -> None:
+    input_ = base_input(
+        total_item_count=10, damaged_or_low_count=3, authenticity_clear=False
+    )
+    assert decide(input_, CONFIG) == "skip"
+
+
+def test_authenticity_not_clear_and_zero_qualifying_items_is_skip() -> None:
+    input_ = base_input(
+        target_grade_count=0, authentic_weapon_count=0, authenticity_clear=False
+    )
+    assert decide(input_, CONFIG) == "skip"
+
+
+def test_weapon_only_authenticity_not_clear_but_over_band_price_is_skip() -> None:
+    input_ = base_input(
+        target_grade_count=0,
+        authentic_weapon_count=2,
+        price=100.0,
+        shipping=0.0,
+        authenticity_clear=False,
+    )
+    assert decide(input_, CONFIG) == "skip"

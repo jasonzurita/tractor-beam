@@ -183,8 +183,10 @@ Then sort:
 |---|---|
 | **Buy now** | cost/figure (or cost/weapon for a weapon-only lot) ≤ target, all counted items `repro_risk: low`, no rare candidates, (prefer returnable) |
 | **Negotiate** | over target but within band, offers accepted, low repro risk, no rare candidates |
-| **Manual review** | any `elevated`/`high` repro risk, any `rare_candidate` item, or `uncertain` grade — authenticity decision needs eyes |
-| **Skip** | too far over target, too few good figures/weapons, disclosed repro, or fails the gate |
+| **Manual review** | price/condition alone would already be buy-now or negotiate, but any `elevated`/`high` repro risk, any `rare_candidate` item, or `uncertain` grade leaves authenticity needing eyes |
+| **Skip** | too far over target/band even ignoring authenticity, too few good figures/weapons, too damaged, disclosed repro, or fails the gate |
+
+An authenticity/confidence flag only ever *demotes* a would-be buy or negotiate down to review — it never promotes a listing that price or condition alone would already skip. A junk-priced or heavily-damaged lot is a skip whether or not it's also authenticity-flagged; there's nothing to review.
 
 **Negotiate band** — config value (~30–40% over target). Offer slightly below target; never surface a lot that loses money after fees at its best realistic price. Negotiate only on offer-accepting, haggle-friendly sources — never live auctions. A negotiate offer on a figure lot adds the full weapon credit on top of the (slightly undercut) figure-only offer, since `target_per_weapon` is already treated as a fair price rather than a haggling ceiling.
 
