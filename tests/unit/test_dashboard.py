@@ -39,6 +39,7 @@ def make_run(**overrides: object) -> RunRecord:
     defaults: dict[str, object] = {
         "id": 1,
         "started_at": "2026-07-07T00:00:00Z",
+        "finished_at": "2026-07-07T00:01:00Z",
         "sources_ok": ["ebay"],
         "sources_failed": [],
         "listings_seen": 5,
@@ -63,6 +64,7 @@ def make_dashboard_data(**overrides: object) -> DashboardData:
         "lock_path": "sw_sourcing.scan.lock",
         "bug_reports_dir": "bug_reports",
         "cwd": "/path/to/tractor-beam",
+        "home": "/Users/example",
     }
     defaults.update(overrides)
     return DashboardData(**defaults)  # type: ignore[arg-type]
@@ -111,7 +113,7 @@ def test_render_escapes_alert_title_and_url() -> None:
             ]
         )
     )
-    assert "<script>" not in html_doc
+    assert "<script>alert('x')</script>" not in html_doc
     assert "&lt;script&gt;" in html_doc
 
 
@@ -186,8 +188,10 @@ def test_collect_bug_reports_respects_limit(tmp_path: Path) -> None:
 
 def test_build_dashboard_data_aggregates_from_db(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")
-    db.record_run(
-        started_at="2026-07-07T00:00:00Z",
+    run_id = db.record_run_started(started_at="2026-07-07T00:00:00Z")
+    db.record_run_finished(
+        run_id=run_id,
+        finished_at="2026-07-07T00:01:00Z",
         sources_ok=["ebay"],
         sources_failed=[],
         listings_seen=5,
@@ -298,3 +302,187 @@ def test_build_dashboard_data_reports_running_when_lock_is_held(
         )
 
     assert data.scan_running is True
+
+
+def test_render_runbook_uses_pgrep_instead_of_self_matching_grep() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "pgrep" in html_doc
+    assert 'ps aux | grep "sw_sourcing.cli' not in html_doc
+
+
+def test_render_runbook_has_copy_buttons_on_commands() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert html_doc.count('class="copy-btn"') >= 5
+
+
+def test_render_runbook_includes_copy_script() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "function copyBlock" in html_doc
+
+
+def test_render_runbook_shows_human_readable_cadences() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "Every 30 minutes" in html_doc
+    assert "Every day at 9:00 AM" in html_doc
+    assert "Every 10 minutes" in html_doc
+
+
+def test_render_runbook_still_shows_raw_cron_expressions() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "*/30 * * * *" in html_doc
+    assert "0 9 * * *" in html_doc
+    assert "*/10 * * * *" in html_doc
+
+
+def test_render_runbook_includes_cadence_reference_table() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "Every hour" in html_doc
+    assert "Every weekday" in html_doc
+
+
+def test_render_runbook_explains_when_to_use_launchd_vs_cron() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "Not logged in" in html_doc
+    assert "keychain" in html_doc.lower()
+
+
+def test_render_runbook_includes_launchd_plist_labels() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "com.tractorbeam.scan" in html_doc
+    assert "com.tractorbeam.send-report" in html_doc
+
+
+def test_render_runbook_launchd_plist_uses_configured_home_and_cwd() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(home="/Users/custom", cwd="/custom/project")
+    )
+    assert "/Users/custom/Library/LaunchAgents" in html_doc
+    assert "/custom/project/.venv/bin/python" in html_doc
+
+
+def test_render_runbook_launchd_commands_are_html_escaped_and_copyable() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data())
+    assert "&lt;key&gt;Label&lt;/key&gt;" in html_doc
+    assert "<key>Label</key>" not in html_doc
+    assert "launchctl bootstrap" in html_doc
+    assert "launchctl kickstart" in html_doc
+    assert "launchctl bootout" in html_doc
+
+
+def test_render_shows_last_run_finished_summary_with_duration() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(
+            generated_at="2026-07-07T00:15:00Z",
+            scan_running=False,
+            recent_runs=[
+                make_run(
+                    started_at="2026-07-07T00:00:00Z",
+                    finished_at="2026-07-07T00:01:30Z",
+                )
+            ],
+        )
+    )
+    assert "1m 30s" in html_doc
+    assert "13m" in html_doc  # ago, generated - finished
+
+
+def test_render_shows_currently_running_summary_when_latest_run_in_progress() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(
+            generated_at="2026-07-07T00:05:00Z",
+            scan_running=True,
+            recent_runs=[
+                make_run(
+                    started_at="2026-07-07T00:00:00Z",
+                    finished_at=None,
+                    sources_ok=[],
+                    sources_failed=[],
+                    listings_seen=None,
+                    alerts_sent=None,
+                )
+            ],
+        )
+    )
+    assert "5m" in html_doc
+    assert "never finished" not in html_doc.lower()
+    assert "⚠️" not in html_doc
+
+
+def test_render_warns_when_latest_run_never_finished_and_scan_is_not_running() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(
+            generated_at="2026-07-07T01:00:00Z",
+            scan_running=False,
+            recent_runs=[
+                make_run(
+                    started_at="2026-07-07T00:00:00Z",
+                    finished_at=None,
+                    sources_ok=[],
+                    sources_failed=[],
+                    listings_seen=None,
+                    alerts_sent=None,
+                )
+            ],
+        )
+    )
+    assert "crashed" in html_doc.lower() or "never finished" in html_doc.lower()
+
+
+def test_render_shows_no_scans_message_in_summary_when_no_runs_recorded() -> None:
+    html_doc = render_dashboard_html(make_dashboard_data(recent_runs=[]))
+    assert "no scans recorded yet" in html_doc.lower()
+
+
+def test_render_recent_runs_table_flags_crashed_run() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(
+            scan_running=False,
+            recent_runs=[
+                make_run(
+                    finished_at=None,
+                    sources_ok=[],
+                    sources_failed=[],
+                    listings_seen=None,
+                    alerts_sent=None,
+                )
+            ],
+        )
+    )
+    assert "crashed" in html_doc.lower()
+
+
+def test_render_recent_runs_table_flags_currently_running_run() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(
+            scan_running=True,
+            recent_runs=[
+                make_run(
+                    finished_at=None,
+                    sources_ok=[],
+                    sources_failed=[],
+                    listings_seen=None,
+                    alerts_sent=None,
+                )
+            ],
+        )
+    )
+    assert "still running" in html_doc.lower()
+
+
+def test_render_recent_runs_table_handles_missing_counts_without_raising() -> None:
+    html_doc = render_dashboard_html(
+        make_dashboard_data(
+            scan_running=True,
+            recent_runs=[
+                make_run(
+                    finished_at=None,
+                    sources_ok=[],
+                    sources_failed=[],
+                    listings_seen=None,
+                    alerts_sent=None,
+                ),
+                make_run(listings_seen=5, alerts_sent=1),
+            ],
+        )
+    )
+    assert "—" in html_doc
