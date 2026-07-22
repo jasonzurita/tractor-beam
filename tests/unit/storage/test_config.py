@@ -87,9 +87,15 @@ def test_default_vision_analysis_budget_and_page_cap_are_set(tmp_path: Path) -> 
     assert config.get("max_fetch_pages_per_source") == 5
 
 
-def test_craigslist_is_enabled_and_oriented_to_long_island(tmp_path: Path) -> None:
+def test_craigslist_is_disabled_by_default_but_configured_for_long_island(
+    tmp_path: Path,
+) -> None:
+    # Deliberately off by default: live Craigslist blocks the RSS feed (403)
+    # and server-renders no listings, so the direct adapter can't reach it
+    # (see adapters/craigslist.py). Config stays oriented to Long Island for
+    # when it's wired to a managed scraper.
     config = make_config(tmp_path)
-    assert "craigslist" in config.get("sources_enabled")
+    assert "craigslist" not in config.get("sources_enabled")
     assert config.get("craigslist_site") == "longisland"
     assert config.get("craigslist_categories") == ["sss"]
     queries = config.get("craigslist_search_queries")

@@ -9,11 +9,18 @@ the same "public data, human contacts the seller" posture as the Facebook
 adapter.
 
 Built against a recorded fixture per the project's adapter testing
-standard. Craigslist has reworked its search UI over the years and the RSS
-field shapes (especially the image `enclosure` attribute and whether a
-price is present) should be recalibrated against the live feed once this is
-pointed at production -- the parser is deliberately tolerant of namespace
-and attribute-name quirks for that reason.
+standard. The parser is deliberately tolerant of namespace and
+attribute-name quirks.
+
+KNOWN LIMITATION (2026-07): Craigslist now actively blocks direct automated
+access -- the public `?format=rss` feed returns a 403 "blocked" page, and
+the plain HTML search page is a JS shell with no server-rendered listings.
+So this direct-fetch adapter cannot currently reach live Craigslist, and
+`craigslist` is disabled in `sources_enabled` by default (see
+storage/config.py). Craigslist is a *defended* source; the spec's intended
+path for those is a managed scraper (Apify), which would feed this adapter's
+`parse_search_rss`/normalization (or a JSON equivalent) rather than hitting
+Craigslist directly. The RSS code below is retained as that starting point.
 """
 
 from __future__ import annotations

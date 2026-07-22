@@ -75,9 +75,14 @@ def test_facebook_is_always_wired(tmp_path: Path) -> None:
     assert "facebook" in adapters
 
 
-def test_craigslist_is_wired_without_credentials(tmp_path: Path) -> None:
-    # Public RSS -- no API keys -- so it's always available when enabled.
-    adapters = build_adapters(make_config(tmp_path))
+def test_craigslist_is_wired_when_enabled_without_credentials(tmp_path: Path) -> None:
+    # Off by default (live RSS is 403-blocked), but the adapter needs no API
+    # keys, so enabling it in config is all it takes to wire -- ready for a
+    # future managed-scraper fetch path.
+    config = make_config(tmp_path)
+    config.set("sources_enabled", ["craigslist"])
+
+    adapters = build_adapters(config)
 
     assert "craigslist" in adapters
 

@@ -45,7 +45,14 @@ DEFAULTS: dict[str, Any] = {
     "negotiate_band_pct": 0.35,
     "max_damage_ratio": 0.20,
     "confidence_floor": 0.5,
-    "sources_enabled": ["ebay", "facebook", "craigslist", "mercari"],
+    # Craigslist is intentionally NOT enabled by default: as of 2026-07 its
+    # public search RSS feed (`?format=rss`) returns 403 "blocked" and the
+    # HTML search page is a JS shell with no server-rendered listings, so the
+    # direct-fetch adapter can't reach it. The adapter + `craigslist_*` config
+    # below are kept for when it's wired to a managed scraper (Apify, per the
+    # spec's Tier-2 approach for defended sources). Re-enable once that path
+    # exists. See adapters/craigslist.py.
+    "sources_enabled": ["ebay", "facebook", "mercari"],
     # Cheap pre-vision screen (core/prefilter.py) -- not in the original
     # spec table, added when wiring the pipeline together.
     "prefilter_required_keywords": ["kenner", "vintage", "star wars"],
