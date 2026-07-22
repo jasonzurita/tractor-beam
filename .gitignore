@@ -14,8 +14,11 @@ venv/
 bug_reports/
 facebook_inbox/
 *.log
+*.log.*
 *.lock
 dashboard.html
+
+.claude/
 
 .mypy_cache/
 .ruff_cache/
