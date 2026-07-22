@@ -32,10 +32,16 @@ def format_alert(
     suggested_offer: float | None = None,
     max_repro_risk: str | None = None,
     returns_accepted: bool | None = None,
+    previous_price: float | None = None,
 ) -> dict[str, Any]:
     """Build a Discord webhook payload for one listing decision."""
     lines = [f"{_OUTCOME_EMOJI[outcome]} **{outcome.upper()}** — {listing.title}"]
     lines.append(str(listing.url))
+    if previous_price is not None and previous_price != listing.price:
+        lines.append(
+            f"💲 Price changed since last alert: ${previous_price:.2f} → "
+            f"${listing.price:.2f}"
+        )
     if target_grade_count is not None:
         lines.append(f"Target-grade figures: {target_grade_count}")
     if cost_per_figure is not None:

@@ -152,6 +152,23 @@ def test_run_skips_disclosed_repro_without_calling_vision(tmp_path: Path) -> Non
     assert summary.alerts_sent == 0
 
 
+def test_run_skips_self_disclosed_era_mismatch_without_calling_vision(
+    tmp_path: Path,
+) -> None:
+    listing = make_listing(
+        listing_id="era-1",
+        title="Vintage Star Wars ACTION FIGURES Kenner 90'S Lot Of 5",
+    )
+    pipeline, vision_client, _, _ = make_pipeline(
+        tmp_path, {"ebay": FakeAdapter([listing])}
+    )
+
+    summary = pipeline.run()
+
+    assert vision_client.calls == 0
+    assert summary.alerts_sent == 0
+
+
 def test_run_skips_off_topic_listings_without_calling_vision(tmp_path: Path) -> None:
     listing = make_listing(
         listing_id="offtopic-1",
@@ -224,6 +241,52 @@ def test_run_realerts_when_a_previously_skipped_listing_drops_in_price(
 
     assert second.alerts_sent == 1  # same listing, price dropped into buy range
     assert vision_client.calls == 1  # same images -> vision_cache hit, no re-billing
+
+
+def test_run_flags_a_price_change_on_a_realert_after_a_price_drop(
+    tmp_path: Path,
+) -> None:
+    listing = make_listing(listing_id="review-1", price=5.0, shipping=0.0)
+    rare_candidate_forces_review = json.dumps(
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "type": "figure",
+                    "grade": "high",
+                    "issues": [],
+                    "repro_risk": "low",
+                    "confidence": 0.9,
+                    "rare_candidate": True,
+                    "rarity_notes": "Possible long-saber variant.",
+                },
+            ],
+            "photo_quality": "clear",
+            "notes": "",
+        }
+    )
+    adapter = FakeAdapter([listing])
+    pipeline, _, discord_client, db = make_pipeline(
+        tmp_path, {"ebay": adapter}, vision_response=rare_candidate_forces_review
+    )
+
+    first = pipeline.run()
+    assert first.alerts_sent == 1
+
+    adapter.set_listings([listing.model_copy(update={"price": 3.0})])
+    second = pipeline.run()
+
+    assert second.alerts_sent == 1
+    review_payloads = [
+        payload for _, payload in discord_client.calls if "REVIEW" in payload["content"]
+    ]
+    assert len(review_payloads) == 2
+    assert "5.00" in review_payloads[1]["content"]
+    assert "3.00" in review_payloads[1]["content"]
+
+    unreported = db.get_unreported_alerts()
+    latest = max(unreported, key=lambda alert: alert.id)
+    assert latest.previous_price == 5.0
 
 
 def test_run_pages_deeper_when_the_first_page_has_no_fresh_listings(

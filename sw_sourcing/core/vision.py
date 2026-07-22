@@ -232,6 +232,11 @@ title. If it is NOT from the original 1977-1985 line, set \
 the piece is a genuine, authentic, unaltered example of its own (later) \
 production run.
 
+Keep "notes" terse: 1-3 short bullet points (each under ~15 words), never \
+a paragraph. Write it as newline-separated lines starting with "- ", one \
+bullet per distinct issue -- a human is skimming this in an email digest, \
+not reading prose.
+
 Return ONLY strict JSON (no markdown fences, no commentary) matching this \
 exact shape:
 {{
@@ -243,7 +248,7 @@ exact shape:
 "era_notes": "optional string"}}
   ],
   "photo_quality": "clear|unclear",
-  "notes": "short free-text notes"
+  "notes": "- terse bullet\n- another terse bullet"
 }}
 """
 

@@ -67,6 +67,7 @@ _ALERT_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
     ("vision_notes", "ALTER TABLE alerts ADD COLUMN vision_notes TEXT"),
     ("price", "ALTER TABLE alerts ADD COLUMN price REAL"),
     ("cost_per_weapon", "ALTER TABLE alerts ADD COLUMN cost_per_weapon REAL"),
+    ("previous_price", "ALTER TABLE alerts ADD COLUMN previous_price REAL"),
 ]
 
 _RUN_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
@@ -91,6 +92,7 @@ class AlertRecord:
     vision_notes: str | None
     cost_per_weapon: float | None
     price: float | None
+    previous_price: float | None
     alerted_at: str
     reported_at: str | None
 
@@ -98,7 +100,8 @@ class AlertRecord:
 _ALERT_COLUMNS = (
     "id, source, listing_id, title, url, image_url, outcome, cost_per_figure,"
     " target_grade_count, max_repro_risk, returns_accepted, suggested_offer,"
-    " vision_notes, cost_per_weapon, price, alerted_at, reported_at"
+    " vision_notes, cost_per_weapon, price, previous_price, alerted_at,"
+    " reported_at"
 )
 
 
@@ -149,8 +152,9 @@ def _row_to_alert_record(row: tuple[object, ...]) -> AlertRecord:
         vision_notes=row[12],  # type: ignore[arg-type]
         cost_per_weapon=row[13],  # type: ignore[arg-type]
         price=row[14],  # type: ignore[arg-type]
-        alerted_at=row[15],  # type: ignore[arg-type]
-        reported_at=row[16],  # type: ignore[arg-type]
+        previous_price=row[15],  # type: ignore[arg-type]
+        alerted_at=row[16],  # type: ignore[arg-type]
+        reported_at=row[17],  # type: ignore[arg-type]
     )
 
 
@@ -199,6 +203,21 @@ class Database:
                 (source, listing_id, outcome, price),
             ).fetchone()
         return row is not None
+
+    def get_last_alert_price(self, source: str, listing_id: str) -> float | None:
+        """The price of the most recent alert sent for this listing, across
+        any outcome -- lets a fresh alert note whether, and by how much, the
+        price moved since the listing was last alerted."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT price FROM alerts
+                WHERE source = ? AND listing_id = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (source, listing_id),
+            ).fetchone()
+        return row[0] if row else None
 
     def get_vision_cache(self, image_set_hash: str) -> str | None:
         with self._connect() as conn:
@@ -256,6 +275,7 @@ class Database:
         vision_notes: str | None,
         cost_per_weapon: float | None,
         price: float | None,
+        previous_price: float | None,
         alerted_at: str,
     ) -> None:
         with self._connect() as conn:
@@ -265,8 +285,8 @@ class Database:
                     source, listing_id, title, url, image_url, outcome,
                     cost_per_figure, target_grade_count, max_repro_risk,
                     returns_accepted, suggested_offer, vision_notes,
-                    cost_per_weapon, price, alerted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_per_weapon, price, previous_price, alerted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -283,6 +303,7 @@ class Database:
                     vision_notes,
                     cost_per_weapon,
                     price,
+                    previous_price,
                     alerted_at,
                 ),
             )

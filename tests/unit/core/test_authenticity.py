@@ -1,4 +1,8 @@
-from sw_sourcing.core.authenticity import clear_repro_risk, is_disclosed_repro
+from sw_sourcing.core.authenticity import (
+    clear_repro_risk,
+    is_disclosed_era_mismatch,
+    is_disclosed_repro,
+)
 
 BLOCKLIST = [
     "repro",
@@ -8,6 +12,16 @@ BLOCKLIST = [
     "custom",
     "aftermarket",
     "not original",
+]
+
+ERA_BLOCKLIST = [
+    "90's",
+    "90s",
+    "1990s",
+    "power of the force",
+    "potf2",
+    "potf 2",
+    "vintage collection",
 ]
 
 
@@ -33,6 +47,30 @@ def test_empty_blocklist_never_flags() -> None:
     text = "reproduction reproduction reproduction"
 
     assert not is_disclosed_repro(text, blocklist=[])
+
+
+def test_disclosed_era_term_is_flagged() -> None:
+    text = "Vintage Star Wars ACTION FIGURES Kenner 90'S Lot Of 5"
+
+    assert is_disclosed_era_mismatch(text, blocklist=ERA_BLOCKLIST)
+
+
+def test_disclosed_era_match_is_case_insensitive() -> None:
+    text = "Kenner POTF2 lot, great shape"
+
+    assert is_disclosed_era_mismatch(text, blocklist=ERA_BLOCKLIST)
+
+
+def test_clean_text_is_not_flagged_as_era_mismatch() -> None:
+    text = "Kenner Original 1977-1983 Star Wars Action Figures Vintage Lot"
+
+    assert not is_disclosed_era_mismatch(text, blocklist=ERA_BLOCKLIST)
+
+
+def test_empty_era_blocklist_never_flags() -> None:
+    text = "90's 90's 90's"
+
+    assert not is_disclosed_era_mismatch(text, blocklist=[])
 
 
 def test_low_risk_and_no_uncertain_grade_clears() -> None:

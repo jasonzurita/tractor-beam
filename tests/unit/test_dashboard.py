@@ -28,6 +28,7 @@ def make_alert(**overrides: object) -> AlertRecord:
         "vision_notes": None,
         "cost_per_weapon": None,
         "price": 45.0,
+        "previous_price": None,
         "alerted_at": "2026-07-07T00:00:00Z",
         "reported_at": None,
     }
@@ -212,6 +213,7 @@ def test_build_dashboard_data_aggregates_from_db(tmp_path: Path) -> None:
         vision_notes=None,
         cost_per_weapon=None,
         price=45.0,
+        previous_price=None,
         alerted_at="2026-07-07T00:00:00Z",
     )
     reports_dir = tmp_path / "bug_reports"

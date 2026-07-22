@@ -393,6 +393,12 @@ def test_build_prompt_treats_scuffs_marks_and_paint_loss_as_beater_grade() -> No
     assert "beater" in prompt.lower()
 
 
+def test_build_prompt_asks_for_terse_bullet_notes() -> None:
+    prompt = build_prompt(title="t", description="d", image_paths=[])
+    assert "bullet" in prompt.lower()
+    assert "notes" in prompt.lower()
+
+
 def test_extract_json_passes_through_plain_json() -> None:
     assert extract_json('{"a": 1}') == '{"a": 1}'
 

@@ -25,6 +25,21 @@ _OUTCOME_LABEL: dict[str, str] = {
 _OUTCOME_ORDER = ("buy", "negotiate", "review")
 
 
+def _render_notes_html(notes: str) -> str:
+    """Render vision notes as a terse bullet list.
+
+    Notes arrive newline-separated (see core/vision.py's prompt); strip any
+    "-"/"•" marker the model already added so it isn't doubled under the
+    <li>'s own bullet.
+    """
+    items = "".join(
+        f"<li>{html.escape(line.lstrip('-• ').strip())}</li>"
+        for line in notes.splitlines()
+        if line.strip()
+    )
+    return f"Notes:<ul>{items}</ul>"
+
+
 def _render_alert_html(alert: AlertRecord) -> str:
     parts = [
         "<div>",
@@ -32,6 +47,11 @@ def _render_alert_html(alert: AlertRecord) -> str:
     ]
     if alert.image_url:
         parts.append(f'<img src="{alert.image_url}" style="max-width:200px"><br>')
+    if alert.previous_price is not None and alert.previous_price != alert.price:
+        parts.append(
+            f"Price changed since last alert: ${alert.previous_price:.2f} → "
+            f"${alert.price:.2f}<br>"
+        )
     if alert.target_grade_count is not None:
         parts.append(f"Target-grade figures: {alert.target_grade_count}<br>")
     if alert.cost_per_figure is not None:
@@ -44,7 +64,7 @@ def _render_alert_html(alert: AlertRecord) -> str:
         parts.append(f"Repro risk: {alert.max_repro_risk}<br>")
     parts.append(f"Returns accepted: {'yes' if alert.returns_accepted else 'no'}<br>")
     if alert.vision_notes:
-        parts.append(f"Notes: {html.escape(alert.vision_notes)}<br>")
+        parts.append(_render_notes_html(alert.vision_notes))
     parts.append("</div><hr>")
     return "".join(parts)
 

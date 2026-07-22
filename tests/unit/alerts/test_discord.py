@@ -49,6 +49,32 @@ def test_format_alert_shows_returns_accepted_when_given() -> None:
     assert "Returns accepted: no" in not_accepted["content"]
 
 
+def test_format_alert_flags_a_price_change_since_last_alert() -> None:
+    listing = make_listing(price=9.0)
+
+    payload = format_alert(listing, "review", previous_price=13.0)
+
+    assert "13.00" in payload["content"]
+    assert "9.00" in payload["content"]
+    assert "Price changed" in payload["content"]
+
+
+def test_format_alert_omits_price_change_note_when_price_is_unchanged() -> None:
+    listing = make_listing(price=9.0)
+
+    payload = format_alert(listing, "review", previous_price=9.0)
+
+    assert "Price changed" not in payload["content"]
+
+
+def test_format_alert_omits_price_change_note_when_no_previous_alert() -> None:
+    listing = make_listing(price=9.0)
+
+    payload = format_alert(listing, "review")
+
+    assert "Price changed" not in payload["content"]
+
+
 def test_format_alert_omits_optional_figures_when_not_given() -> None:
     listing = make_listing()
 

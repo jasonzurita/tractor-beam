@@ -20,6 +20,7 @@ def make_alert(**overrides: object) -> AlertRecord:
         "vision_notes": None,
         "cost_per_weapon": None,
         "price": 45.0,
+        "previous_price": None,
         "alerted_at": "2026-07-07T12:00:00Z",
         "reported_at": None,
     }
@@ -81,10 +82,45 @@ def test_format_report_includes_vision_notes_when_present() -> None:
     assert "Two droids lack a visible backstamp." in html
 
 
+def test_format_report_flags_a_price_change_since_last_alert() -> None:
+    _, html = format_report([make_alert(price=9.0, previous_price=13.0)])
+
+    assert "13.00" in html
+    assert "9.00" in html
+    assert "Price changed" in html
+
+
+def test_format_report_omits_price_change_note_when_price_is_unchanged() -> None:
+    _, html = format_report([make_alert(price=9.0, previous_price=9.0)])
+
+    assert "Price changed" not in html
+
+
+def test_format_report_omits_price_change_note_when_no_previous_alert() -> None:
+    _, html = format_report([make_alert(price=9.0, previous_price=None)])
+
+    assert "Price changed" not in html
+
+
 def test_format_report_omits_notes_block_when_absent() -> None:
     _, html = format_report([make_alert(vision_notes=None)])
 
     assert "Notes" not in html
+
+
+def test_format_report_renders_multiline_vision_notes_as_bullets() -> None:
+    _, html = format_report(
+        [make_alert(vision_notes="Not vintage Kenner.\n⭐ Possible rare item: none")]
+    )
+
+    assert "<li>Not vintage Kenner.</li>" in html
+    assert "<li>⭐ Possible rare item: none</li>" in html
+
+
+def test_format_report_strips_bullet_markers_the_model_already_added() -> None:
+    _, html = format_report([make_alert(vision_notes="- Not vintage Kenner.")])
+
+    assert "<li>Not vintage Kenner.</li>" in html
 
 
 def test_format_report_escapes_html_in_vision_notes() -> None:

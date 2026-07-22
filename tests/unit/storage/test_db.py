@@ -57,6 +57,7 @@ def record_sample_alert(db: Database, **overrides: object) -> None:
         "vision_notes": None,
         "cost_per_weapon": None,
         "price": 45.0,
+        "previous_price": None,
         "alerted_at": "2026-07-06T00:00:00Z",
     }
     defaults.update(overrides)
@@ -159,6 +160,71 @@ def test_opening_a_pre_price_column_db_migrates_the_column(tmp_path: Path) -> No
     record_sample_alert(db, listing_id="1", price=12.5)
 
     assert db.get_unreported_alerts()[0].price == 12.5
+
+
+def test_unreported_alerts_round_trips_previous_price(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", price=9.0, previous_price=13.0)
+
+    unreported = db.get_unreported_alerts()
+
+    assert unreported[0].previous_price == 13.0
+
+
+def test_opening_a_pre_previous_price_db_migrates_the_column(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE alerts (
+            id INTEGER PRIMARY KEY,
+            source TEXT NOT NULL,
+            listing_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            image_url TEXT,
+            outcome TEXT NOT NULL,
+            cost_per_figure REAL,
+            target_grade_count INTEGER,
+            max_repro_risk TEXT,
+            returns_accepted INTEGER,
+            suggested_offer REAL,
+            vision_notes TEXT,
+            price REAL,
+            cost_per_weapon REAL,
+            alerted_at TEXT NOT NULL,
+            reported_at TEXT
+        )
+        """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    record_sample_alert(db, listing_id="1")
+
+    assert db.get_unreported_alerts()[0].previous_price is None
+
+
+def test_get_last_alert_price_is_none_when_never_alerted(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    assert db.get_last_alert_price("ebay", "1") is None
+
+
+def test_get_last_alert_price_returns_the_most_recent_alerts_price(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, listing_id="1", outcome="review", price=13.0)
+    record_sample_alert(db, listing_id="1", outcome="review", price=9.0)
+
+    assert db.get_last_alert_price("ebay", "1") == 9.0
+
+
+def test_get_last_alert_price_is_scoped_per_source_and_listing(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    record_sample_alert(db, source="ebay", listing_id="1", price=13.0)
+    record_sample_alert(db, source="mercari", listing_id="1", price=99.0)
+
+    assert db.get_last_alert_price("ebay", "1") == 13.0
 
 
 def test_opening_a_pre_cost_per_weapon_db_migrates_the_column(tmp_path: Path) -> None:

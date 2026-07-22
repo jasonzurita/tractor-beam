@@ -6,6 +6,7 @@ import pytest
 
 import sw_sourcing.cli as cli
 from sw_sourcing import lock
+from sw_sourcing.adapters.facebook_assist import FacebookAssistAdapter
 from sw_sourcing.cli import build_adapters, configure_logging, main, send_report
 from sw_sourcing.storage.config import Config
 from sw_sourcing.storage.db import Database
@@ -74,6 +75,13 @@ def test_facebook_is_always_wired(tmp_path: Path) -> None:
     assert "facebook" in adapters
 
 
+def test_craigslist_is_wired_without_credentials(tmp_path: Path) -> None:
+    # Public RSS -- no API keys -- so it's always available when enabled.
+    adapters = build_adapters(make_config(tmp_path))
+
+    assert "craigslist" in adapters
+
+
 def test_adapters_are_filtered_to_sources_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -96,6 +104,64 @@ def test_mercari_is_never_wired_since_no_apify_client_is_configured(
     adapters = build_adapters(make_config(tmp_path))
 
     assert "mercari" not in adapters
+
+
+def test_add_facebook_command_forwards_a_listing_the_adapter_can_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The human-in-the-loop path: forwarding a Marketplace listing you're
+    # already viewing drops one inbox file that the Facebook adapter then
+    # drains -- no scraping, no auto-messaging.
+    inbox = tmp_path / "fb_inbox"
+    monkeypatch.setenv("FACEBOOK_INBOX_DIR", str(inbox))
+
+    exit_code = main(
+        [
+            "add-facebook",
+            "--url",
+            "https://www.facebook.com/marketplace/item/1234567890/",
+            "--title",
+            "Vintage Kenner Star Wars lot",
+            "--price",
+            "40",
+            "--image",
+            "https://scontent.example.com/a.jpg",
+            "--image",
+            "https://scontent.example.com/b.jpg",
+            "--location",
+            "Merrick, NY",
+        ]
+    )
+
+    assert exit_code == 0
+    listings = FacebookAssistAdapter(inbox).fetch()
+    assert len(listings) == 1
+    listing = listings[0]
+    assert listing.source == "facebook"
+    assert listing.listing_id == "1234567890"  # derived from the URL
+    assert listing.title == "Vintage Kenner Star Wars lot"
+    assert listing.price == 40.0
+    assert len(listing.images) == 2
+    assert listing.location == "Merrick, NY"
+
+
+def test_add_facebook_command_errors_when_no_listing_id_can_be_derived(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FACEBOOK_INBOX_DIR", str(tmp_path / "fb_inbox"))
+
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "add-facebook",
+                "--url",
+                "https://www.facebook.com/marketplace/",
+                "--title",
+                "no id here",
+                "--price",
+                "10",
+            ]
+        )
 
 
 def test_report_bug_command_writes_a_report_and_exits_cleanly(
@@ -135,6 +201,7 @@ def test_send_report_emails_unreported_alerts_and_marks_them_reported(
         vision_notes=None,
         cost_per_weapon=None,
         price=45.0,
+        previous_price=None,
         alerted_at="2026-07-07T00:00:00Z",
     )
     smtp = FakeSmtp()
@@ -170,6 +237,125 @@ def test_send_report_is_a_noop_when_nothing_is_unreported(tmp_path: Path) -> Non
 
     assert count == 0
     assert smtp.sent_messages == []
+
+
+def test_send_report_drops_sold_alerts_and_marks_them_reported_without_emailing(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    db.record_alert(
+        source="ebay",
+        listing_id="sold-1",
+        title="Sold vintage lot",
+        url="https://example.com/sold-1",
+        image_url=None,
+        outcome="buy",
+        cost_per_figure=4.5,
+        target_grade_count=10,
+        max_repro_risk="low",
+        returns_accepted=True,
+        suggested_offer=None,
+        vision_notes=None,
+        cost_per_weapon=None,
+        price=45.0,
+        previous_price=None,
+        alerted_at="2026-07-07T00:00:00Z",
+    )
+    smtp = FakeSmtp()
+
+    count = send_report(
+        db,
+        to_addr="jasonzurita@me.com",
+        smtp_host="smtp.gmail.com",
+        smtp_port=465,
+        smtp_username="jzuri1@gmail.com",
+        smtp_password="app-password",
+        smtp_factory=lambda: smtp,
+        is_still_listed=lambda alert: False,
+    )
+
+    assert count == 0
+    assert smtp.sent_messages == []
+    assert db.get_unreported_alerts() == []
+
+
+def test_send_report_emails_only_the_still_listed_alerts(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    for listing_id in ("still-here", "sold-out"):
+        db.record_alert(
+            source="ebay",
+            listing_id=listing_id,
+            title="Vintage lot",
+            url=f"https://example.com/{listing_id}",
+            image_url=None,
+            outcome="buy",
+            cost_per_figure=4.5,
+            target_grade_count=10,
+            max_repro_risk="low",
+            returns_accepted=True,
+            suggested_offer=None,
+            vision_notes=None,
+            cost_per_weapon=None,
+            price=45.0,
+            previous_price=None,
+            alerted_at="2026-07-07T00:00:00Z",
+        )
+    smtp = FakeSmtp()
+
+    count = send_report(
+        db,
+        to_addr="jasonzurita@me.com",
+        smtp_host="smtp.gmail.com",
+        smtp_port=465,
+        smtp_username="jzuri1@gmail.com",
+        smtp_password="app-password",
+        smtp_factory=lambda: smtp,
+        is_still_listed=lambda alert: alert.listing_id == "still-here",
+    )
+
+    assert count == 1
+    assert len(smtp.sent_messages) == 1
+    html_part = smtp.sent_messages[0].get_body(preferencelist=("html",))
+    assert html_part is not None
+    assert "example.com/still-here" in html_part.get_content()
+    assert "example.com/sold-out" not in html_part.get_content()
+
+
+def test_send_report_defaults_to_treating_every_alert_as_still_listed(
+    tmp_path: Path,
+) -> None:
+    db = make_db(tmp_path)
+    db.record_alert(
+        source="ebay",
+        listing_id="1",
+        title="Vintage Kenner lot",
+        url="https://example.com/1",
+        image_url=None,
+        outcome="buy",
+        cost_per_figure=4.5,
+        target_grade_count=10,
+        max_repro_risk="low",
+        returns_accepted=True,
+        suggested_offer=None,
+        vision_notes=None,
+        cost_per_weapon=None,
+        price=45.0,
+        previous_price=None,
+        alerted_at="2026-07-07T00:00:00Z",
+    )
+    smtp = FakeSmtp()
+
+    count = send_report(
+        db,
+        to_addr="jasonzurita@me.com",
+        smtp_host="smtp.gmail.com",
+        smtp_port=465,
+        smtp_username="jzuri1@gmail.com",
+        smtp_password="app-password",
+        smtp_factory=lambda: smtp,
+    )
+
+    assert count == 1
 
 
 def test_scan_skips_cleanly_when_a_previous_scan_is_still_running(
@@ -215,6 +401,67 @@ def test_scan_skips_cleanly_and_never_takes_the_lock_when_network_is_unreachable
     # network check passes.
     with lock.acquire(lock_path) as acquired:
         assert acquired
+
+
+def test_build_availability_checker_is_none_without_ebay_credentials() -> None:
+    checker = cli._build_availability_checker(ebay_app_id=None, ebay_cert_id=None)
+
+    assert checker is None
+
+
+def test_build_availability_checker_is_none_and_reports_when_token_fetch_fails(
+    tmp_path: Path,
+) -> None:
+    reports_dir = tmp_path / "bug_reports"
+
+    checker = cli._build_availability_checker(
+        ebay_app_id="app-id",
+        ebay_cert_id="cert-id",
+        ebay_token_client=fake_token_client(status_code=401),
+        bug_reports_dir=reports_dir,
+    )
+
+    assert checker is None
+    assert list(reports_dir.glob("*.md"))
+
+
+def test_build_availability_checker_only_checks_ebay_alerts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checker = cli._build_availability_checker(
+        ebay_app_id="app-id",
+        ebay_cert_id="cert-id",
+        ebay_token_client=fake_token_client(),
+    )
+    assert checker is not None
+
+    def _boom(*args: object, **kwargs: object) -> bool:
+        raise AssertionError("facebook alerts should never hit the eBay API")
+
+    monkeypatch.setattr(cli, "is_still_listed", _boom)
+
+    db = make_db(tmp_path)
+    db.record_alert(
+        source="facebook",
+        listing_id="1",
+        title="Vintage lot",
+        url="https://example.com/1",
+        image_url=None,
+        outcome="review",
+        cost_per_figure=None,
+        target_grade_count=None,
+        max_repro_risk=None,
+        returns_accepted=False,
+        suggested_offer=None,
+        vision_notes=None,
+        cost_per_weapon=None,
+        price=None,
+        previous_price=None,
+        alerted_at="2026-07-07T00:00:00Z",
+    )
+    alert = db.get_unreported_alerts()[0]
+
+    assert checker(alert) is True
 
 
 def test_send_report_skips_cleanly_when_network_is_unreachable(

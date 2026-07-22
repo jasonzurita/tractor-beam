@@ -16,7 +16,11 @@ from pathlib import Path
 
 from sw_sourcing.adapters.base import Adapter
 from sw_sourcing.alerts.discord import DiscordAlerts, format_alert, format_heartbeat
-from sw_sourcing.core.authenticity import clear_repro_risk, is_disclosed_repro
+from sw_sourcing.core.authenticity import (
+    clear_repro_risk,
+    is_disclosed_era_mismatch,
+    is_disclosed_repro,
+)
 from sw_sourcing.core.decision import DecisionConfig, DecisionInput, Outcome, decide
 from sw_sourcing.core.dedupe import Dedupe
 from sw_sourcing.core.negotiation import suggested_offer
@@ -178,6 +182,11 @@ class Pipeline:
             blocklist=self._config.get("repro_keyword_blocklist"),
         ):
             return False
+        if is_disclosed_era_mismatch(
+            f"{listing.title} {listing.description}",
+            blocklist=self._config.get("era_mismatch_keyword_blocklist"),
+        ):
+            return False
         return True
 
     def _maybe_write_report(
@@ -319,12 +328,16 @@ class Pipeline:
                     target_per_figure=target_per_weapon,
                 )
 
+        previous_price = self._db.get_last_alert_price(
+            listing.source, listing.listing_id
+        )
+
         notes_parts = [vision_result.notes] if vision_result.notes else []
         if vision_result.rare_items_summary:
             notes_parts.append(
                 f"⭐ Possible rare item: {vision_result.rare_items_summary}"
             )
-        combined_notes = " | ".join(notes_parts) or None
+        combined_notes = "\n".join(notes_parts) or None
 
         if self._alerts is not None:
             self._alerts.send(
@@ -337,6 +350,7 @@ class Pipeline:
                     suggested_offer=offer,
                     max_repro_risk=vision_result.max_repro_risk,
                     returns_accepted=listing.returns_accepted,
+                    previous_price=previous_price,
                 )
             )
         self._db.record_alert(
@@ -354,5 +368,6 @@ class Pipeline:
             vision_notes=combined_notes,
             cost_per_weapon=cost_per_weapon,
             price=listing.price,
+            previous_price=previous_price,
             alerted_at=datetime.now(UTC).isoformat(),
         )
