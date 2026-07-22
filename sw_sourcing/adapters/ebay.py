@@ -10,8 +10,10 @@ against the live API once real credentials are wired up.
 from __future__ import annotations
 
 import base64
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -56,6 +58,40 @@ def get_ebay_access_token(
     )
     response.raise_for_status()
     return str(response.json()["access_token"])
+
+
+def is_still_listed(
+    item_id: str, *, app_token: str, client: httpx.Client | None = None
+) -> bool:
+    """True unless eBay confirms this listing has ended or sold out.
+
+    Fails open (assumes still listed) on a 404/5xx-adjacent ambiguity, an
+    unexpected response shape, or a network error -- a transient blip
+    should never silently drop a still-good alert from the digest, per the
+    project's graceful-degradation rule. Only an explicit "gone" (404/410)
+    or "sold out" (OUT_OF_STOCK) signal counts as not listed.
+    """
+    client = client or httpx.Client(base_url="https://api.ebay.com", timeout=15.0)
+    try:
+        response = client.get(
+            f"/buy/browse/v1/item/{quote(item_id, safe='')}",
+            headers={
+                "Authorization": f"Bearer {app_token}",
+                "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+            },
+        )
+    except httpx.HTTPError:
+        return True
+
+    if response.status_code in (404, 410):
+        return False
+    if response.status_code != 200:
+        return True
+
+    availabilities = response.json().get("estimatedAvailabilities", [])
+    return not any(
+        a.get("estimatedAvailabilityStatus") == "OUT_OF_STOCK" for a in availabilities
+    )
 
 
 def _buying_option(options: list[str]) -> BuyingOption:
@@ -110,18 +146,50 @@ def normalize_item(item: dict[str, Any], *, fetched_at: datetime) -> Listing:
 
 
 class EbayAdapter:
-    """Fetches Browse API search results for one saved query."""
+    """Fetches Browse API search results across one or more saved queries.
+
+    Each query is a separate Browse API search; the adapter unions their
+    results (deduped by listing id) into one `Listing` batch, so widening
+    the query list widens coverage without any change downstream -- the
+    core still sees plain `Listing` objects from a single "ebay" source.
+    """
 
     def __init__(
-        self, *, app_token: str, query: str, client: httpx.Client | None = None
+        self,
+        *,
+        app_token: str,
+        queries: Sequence[str],
+        client: httpx.Client | None = None,
     ) -> None:
         self._app_token = app_token
-        self._query = query
+        self._queries = list(queries)
         self._client = client or httpx.Client(
             base_url="https://api.ebay.com", timeout=15.0
         )
 
     def fetch(self, *, offset: int = 0) -> list[Listing]:
+        # One-shot: several queries at 50 results each already far exceed a
+        # run's fresh-analysis budget, and `newlyListed` sort keeps the
+        # freshest inventory on the first page of each query -- so there's
+        # nothing to gain from paging deeper. Any offset>0 request is
+        # therefore "exhausted", the same contract the Facebook inbox
+        # adapter uses (see adapters/base.py).
+        if offset > 0:
+            return []
+
+        fetched_at = datetime.now(UTC)
+        listings: list[Listing] = []
+        seen: set[str] = set()
+        for query in self._queries:
+            for item in self._search(query):
+                listing = normalize_item(item, fetched_at=fetched_at)
+                if listing.listing_id in seen:
+                    continue
+                seen.add(listing.listing_id)
+                listings.append(listing)
+        return listings
+
+    def _search(self, query: str) -> list[dict[str, Any]]:
         response = self._client.get(
             "/buy/browse/v1/item_summary/search",
             # Sorted newest-first, not eBay's default best-match relevance --
@@ -129,10 +197,10 @@ class EbayAdapter:
             # top-50 static "best match" page and never see fresh inventory
             # that ranks outside it.
             params={
-                "q": self._query,
+                "q": query,
                 "limit": 50,
                 "sort": "newlyListed",
-                "offset": offset,
+                "offset": 0,
             },
             headers={
                 "Authorization": f"Bearer {self._app_token}",
@@ -140,9 +208,6 @@ class EbayAdapter:
             },
         )
         response.raise_for_status()
-        payload = response.json()
-        fetched_at = datetime.now(UTC)
-        return [
-            normalize_item(item, fetched_at=fetched_at)
-            for item in payload.get("itemSummaries", [])
-        ]
+        payload: dict[str, Any] = response.json()
+        items: list[dict[str, Any]] = payload.get("itemSummaries", [])
+        return items

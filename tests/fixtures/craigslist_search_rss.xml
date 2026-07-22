@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+ xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+ xmlns="http://purl.org/rss/1.0/"
+ xmlns:enc="http://purl.oclc.org/net/rss_2.0/enc#"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:syn="http://purl.org/rss/1.0/modules/syndication/">
+<channel rdf:about="https://longisland.craigslist.org/search/sss?query=star+wars&amp;format=rss">
+ <title>craigslist | long island for sale "star wars"</title>
+ <link>https://longisland.craigslist.org/search/sss?query=star+wars</link>
+ <description />
+ <items>
+  <rdf:Seq>
+   <rdf:li rdf:resource="https://longisland.craigslist.org/clt/d/merrick-vintage-star-wars-lot/7891234567.html" />
+   <rdf:li rdf:resource="https://longisland.craigslist.org/tag/d/huntington-kenner-figures/7891234568.html" />
+   <rdf:li rdf:resource="https://longisland.craigslist.org/tag/d/hempstead-star-wars-stuff/7891234569.html" />
+  </rdf:Seq>
+ </items>
+</channel>
+<item rdf:about="https://longisland.craigslist.org/clt/d/merrick-vintage-star-wars-lot/7891234567.html">
+ <title><![CDATA[Vintage Kenner Star Wars Figure Lot of 8 - $50 (Merrick)]]></title>
+ <link>https://longisland.craigslist.org/clt/d/merrick-vintage-star-wars-lot/7891234567.html</link>
+ <description><![CDATA[Lot of 8 loose vintage 1978-1983 Kenner Star Wars figures with a few weapons. From my childhood, cash and local pickup only.]]></description>
+ <dc:date>2026-07-22T09:15:00-04:00</dc:date>
+ <enc:enclosure resource="https://images.craigslist.org/00X0X_merrick_600x450.jpg" type="image/jpeg" />
+</item>
+<item rdf:about="https://longisland.craigslist.org/tag/d/huntington-kenner-figures/7891234568.html">
+ <title><![CDATA[Star Wars vintage figures & weapons - $1,200 (Huntington)]]></title>
+ <link>https://longisland.craigslist.org/tag/d/huntington-kenner-figures/7891234568.html</link>
+ <description><![CDATA[Large collection, serious buyers only.]]></description>
+ <dc:date>2026-07-22T08:02:00-04:00</dc:date>
+ <enc:enclosure resource="https://images.craigslist.org/00Y0Y_huntington_600x450.jpg" type="image/jpeg" />
+</item>
+<item rdf:about="https://longisland.craigslist.org/tag/d/hempstead-star-wars-stuff/7891234569.html">
+ <title><![CDATA[Star Wars stuff (Hempstead)]]></title>
+ <link>https://longisland.craigslist.org/tag/d/hempstead-star-wars-stuff/7891234569.html</link>
+ <description><![CDATA[Make an offer, no price listed.]]></description>
+ <dc:date>2026-07-22T07:44:00-04:00</dc:date>
+</item>
+</rdf:RDF>

@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -18,7 +19,12 @@ from dotenv import load_dotenv
 
 from sw_sourcing import lock
 from sw_sourcing.adapters.base import Adapter
-from sw_sourcing.adapters.ebay import EbayAdapter, get_ebay_access_token
+from sw_sourcing.adapters.craigslist import CraigslistAdapter
+from sw_sourcing.adapters.ebay import (
+    EbayAdapter,
+    get_ebay_access_token,
+    is_still_listed,
+)
 from sw_sourcing.adapters.facebook_assist import FacebookAssistAdapter
 from sw_sourcing.alerts.discord import DiscordAlerts
 from sw_sourcing.alerts.email import EmailSender, format_report
@@ -30,7 +36,7 @@ from sw_sourcing.network import wait_for_network
 from sw_sourcing.pipeline import Pipeline
 from sw_sourcing.storage.config import DEFAULTS as CONFIG_DEFAULTS
 from sw_sourcing.storage.config import Config
-from sw_sourcing.storage.db import Database
+from sw_sourcing.storage.db import AlertRecord, Database
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +110,7 @@ def build_adapters(
         try:
             token = get_ebay_access_token(app_id, cert_id, client=ebay_token_client)
             registry["ebay"] = EbayAdapter(
-                app_token=token, query="vintage kenner star wars"
+                app_token=token, queries=config.get("ebay_search_queries")
             )
         except Exception as exc:
             logger.exception("Failed to fetch eBay OAuth token; skipping eBay")
@@ -118,8 +124,65 @@ def build_adapters(
     inbox_dir = os.environ.get(_FACEBOOK_INBOX_ENV, _DEFAULT_FACEBOOK_INBOX)
     registry["facebook"] = FacebookAssistAdapter(inbox_dir)
 
+    # Craigslist needs no credentials -- it reads public search RSS feeds --
+    # so it's always registered, then filtered by sources_enabled below.
+    registry["craigslist"] = CraigslistAdapter(
+        site=config.get("craigslist_site"),
+        queries=config.get("craigslist_search_queries"),
+        categories=config.get("craigslist_categories"),
+    )
+
     enabled = set(config.get("sources_enabled"))
     return {name: adapter for name, adapter in registry.items() if name in enabled}
+
+
+_FACEBOOK_ITEM_ID_RE = re.compile(r"/marketplace/item/(\d+)")
+
+
+def add_facebook_listing(
+    inbox_dir: Path | str,
+    *,
+    url: str,
+    title: str,
+    price: float,
+    images: list[str],
+    description: str = "",
+    location: str | None = None,
+    listing_id: str | None = None,
+) -> Path:
+    """Forward one Facebook Marketplace listing into the inbox the assist
+    adapter drains -- the ToS-safe human-in-the-loop path (you're already
+    viewing the listing; this just hands its public fields to the pipeline,
+    no scraping and no messaging the seller).
+
+    The listing id is taken from `--listing-id` or derived from a
+    `/marketplace/item/<id>/` URL; without either there's nothing stable to
+    dedupe on, so it's an error rather than a guess.
+    """
+    if listing_id is None:
+        match = _FACEBOOK_ITEM_ID_RE.search(url)
+        if match is None:
+            raise ValueError(
+                "could not derive a listing id from the URL; pass --listing-id"
+            )
+        listing_id = match.group(1)
+
+    payload: dict[str, Any] = {
+        "listing_id": listing_id,
+        "url": url,
+        "title": title,
+        "description": description,
+        "price": price,
+        "images": images,
+    }
+    if location is not None:
+        payload["location"] = location
+
+    inbox = Path(inbox_dir)
+    inbox.mkdir(parents=True, exist_ok=True)
+    path = inbox / f"{listing_id}.json"
+    path.write_text(json.dumps(payload, indent=2))
+    return path
 
 
 def send_report(
@@ -131,17 +194,38 @@ def send_report(
     smtp_username: str,
     smtp_password: str,
     smtp_factory: Callable[[], Any] | None = None,
+    is_still_listed: Callable[[AlertRecord], bool] | None = None,
 ) -> int:
     """Email everything not yet reported; a no-op (returns 0) if nothing's
     new. Cadence is deliberately not this function's concern -- call it as
     often as you like (e.g. from cron); it only ever sends what's new since
     the last successful send.
+
+    `scan` and `send-report` run on independent cadences, so a listing can
+    sell in the gap between being alerted and the digest actually landing.
+    `is_still_listed` (default: treat everything as still listed) gets one
+    last look right before the email is built; anything it flags as gone is
+    dropped from the email and still marked reported -- there's nothing more
+    to say about a listing that already sold.
     """
     unreported = db.get_unreported_alerts()
     if not unreported:
         return 0
 
-    subject, html = format_report(unreported)
+    check = is_still_listed or (lambda alert: True)
+    still_listed: list[AlertRecord] = []
+    sold: list[AlertRecord] = []
+    for alert in unreported:
+        (still_listed if check(alert) else sold).append(alert)
+
+    now = datetime.now(UTC).isoformat()
+    if sold:
+        db.mark_alerts_reported([alert.id for alert in sold], reported_at=now)
+
+    if not still_listed:
+        return 0
+
+    subject, html = format_report(still_listed)
     EmailSender(
         host=smtp_host,
         port=smtp_port,
@@ -150,10 +234,48 @@ def send_report(
         smtp_factory=smtp_factory,
     ).send(to_addr=to_addr, subject=subject, html_body=html)
 
-    db.mark_alerts_reported(
-        [alert.id for alert in unreported], reported_at=datetime.now(UTC).isoformat()
-    )
-    return len(unreported)
+    db.mark_alerts_reported([alert.id for alert in still_listed], reported_at=now)
+    return len(still_listed)
+
+
+def _build_availability_checker(
+    *,
+    ebay_app_id: str | None,
+    ebay_cert_id: str | None,
+    ebay_token_client: httpx.Client | None = None,
+    bug_reports_dir: Path | str = DEFAULT_REPORTS_DIR,
+) -> Callable[[AlertRecord], bool] | None:
+    """A checker that re-verifies only eBay alerts before they're emailed --
+    Facebook is human-in-the-loop with no API to query, so there's no more
+    accurate signal to add there; those alerts always pass through.
+
+    Returns None (skip the check entirely) without eBay credentials, or if
+    the token fetch fails -- same graceful-degradation posture as
+    `build_adapters`, since a failed availability check should never block
+    the whole digest.
+    """
+    if not (ebay_app_id and ebay_cert_id):
+        return None
+    try:
+        token = get_ebay_access_token(
+            ebay_app_id, ebay_cert_id, client=ebay_token_client
+        )
+    except Exception as exc:
+        logger.exception("Failed to fetch eBay OAuth token; skipping sold-check")
+        write_report(
+            summary="Failed to fetch eBay OAuth token for the sold-check",
+            context={"app_id_set": True, "cert_id_set": True},
+            exception=exc,
+            reports_dir=bug_reports_dir,
+        )
+        return None
+
+    def check(alert: AlertRecord) -> bool:
+        if alert.source != "ebay":
+            return True
+        return is_still_listed(alert.listing_id, app_token=token)
+
+    return check
 
 
 def _network_ready(config: Config, *, command: str) -> bool:
@@ -195,6 +317,29 @@ def main(argv: list[str] | None = None) -> int:
         "note", help="Free-text description of what looked wrong"
     )
 
+    fb_parser = subparsers.add_parser(
+        "add-facebook",
+        help="Forward a Facebook Marketplace listing you're viewing into the "
+        "inbox the scan drains (human-in-the-loop; no scraping)",
+    )
+    fb_parser.add_argument("--url", required=True, help="The Marketplace listing URL")
+    fb_parser.add_argument("--title", required=True, help="Listing title")
+    fb_parser.add_argument("--price", required=True, type=float, help="Asking price")
+    fb_parser.add_argument(
+        "--image",
+        action="append",
+        default=[],
+        dest="images",
+        help="An image URL (repeat --image for each photo)",
+    )
+    fb_parser.add_argument("--description", default="", help="Listing description text")
+    fb_parser.add_argument("--location", help="Seller location, e.g. 'Merrick, NY'")
+    fb_parser.add_argument(
+        "--listing-id",
+        dest="listing_id",
+        help="Override the id (default: derived from a /marketplace/item/<id>/ URL)",
+    )
+
     config_parser = subparsers.add_parser(
         "config", help="Get or set a threshold in the config table"
     )
@@ -229,6 +374,24 @@ def main(argv: list[str] | None = None) -> int:
             reports_dir=bug_reports_dir,
         )
         print(f"Logged: {path}")
+        return 0
+
+    if args.command == "add-facebook":
+        inbox_dir = os.environ.get(_FACEBOOK_INBOX_ENV, _DEFAULT_FACEBOOK_INBOX)
+        try:
+            path = add_facebook_listing(
+                inbox_dir,
+                url=args.url,
+                title=args.title,
+                price=args.price,
+                images=args.images,
+                description=args.description,
+                location=args.location,
+                listing_id=args.listing_id,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Forwarded to inbox: {path}")
         return 0
 
     db_path = os.environ.get(_DB_PATH_ENV, _DEFAULT_DB_PATH)
@@ -278,6 +441,11 @@ def main(argv: list[str] | None = None) -> int:
         if not _network_ready(Config(db), command="send-report"):
             return 0
         try:
+            checker = _build_availability_checker(
+                ebay_app_id=os.environ.get("EBAY_APP_ID"),
+                ebay_cert_id=os.environ.get("EBAY_CERT_ID"),
+                bug_reports_dir=bug_reports_dir,
+            )
             count = send_report(
                 db,
                 to_addr=os.environ["REPORT_TO_EMAIL"],
@@ -285,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
                 smtp_port=int(os.environ.get("SMTP_PORT", _DEFAULT_SMTP_PORT)),
                 smtp_username=os.environ["SMTP_USERNAME"],
                 smtp_password=os.environ["SMTP_PASSWORD"],
+                is_still_listed=checker,
             )
         except Exception as exc:
             logger.exception("Unhandled error sending report; see bug_reports/")
